@@ -41,6 +41,7 @@ const GlobalMut = def.GlobalMut;
 const IfImmediates = def.IfImmediates;
 const ImportNames = def.ImportNames;
 const Instruction = def.Instruction;
+const InstructionImmediates = def.InstructionImmediates;
 const Limits = def.Limits;
 const MemoryDefinition = def.MemoryDefinition;
 const MemoryOffsetAndLaneImmediates = def.MemoryOffsetAndLaneImmediates;
@@ -748,7 +749,6 @@ const FunctionCompiler = struct {
         var compile_data = IntermediateCompileData.init(compiler.allocator);
         defer compile_data.deinit();
 
-        // TODO could
         for (0..compiler.module_def.functions.items.len) |i| {
             std.debug.print("compiler.module_def.functions.items.len: {}, i: {}\n\n", .{ compiler.module_def.functions.items.len, i });
             var function_ir = try compiler.compileFunc(i, &compile_data);
@@ -1152,12 +1152,6 @@ const FunctionInstance = struct {
     }
 };
 
-const CompiledFunctions = struct {
-    local_types: std.ArrayList(ValType),
-    instructions: std.ArrayList(RegInstruction),
-    instances: std.ArrayList(FunctionInstance),
-};
-
 const Label = struct {
     // TODO figure out what this struct should be
     // num_returns: u32,
@@ -1296,10 +1290,185 @@ const MachineState = struct {
     }
 };
 
+// "stream" of instructions where the format is:
+// * opcode
+// * immediates
+// * register slots
+const InstructionStream = struct {
+    data: std.ArrayList(u8),
+
+    const InnerReaderType = std.io.FixedBufferStream([]u8).Reader;
+
+    fn emit(stream: *InstructionStream, opcode: Opcode, maybe_immediates: ?InstructionImmediates, registers: []u32) AllocError!void {
+        const Helpers = struct {
+            // writer has writeByteNTimes but it works best in chunks of 256, and most of our immediates are 4-16 bytes
+            fn pad(writer: anytype, num_bytes: usize) AllocError!void {
+                for (0..num_bytes) |_| {
+                    writer.writeByte(0xAD) catch return AllocError.OutOfMemory;
+                }
+            }
+        };
+
+        var writer = stream.data.writer();
+
+        const offset_to_opcode = std.mem.alignForward(usize, stream.data.items.len, @alignOf(Opcode));
+        Helpers.pad(offset_to_opcode);
+
+        writer.write(std.mem.asBytes(&opcode)) catch return AllocError.OutOfMemory;
+
+        if (maybe_immediates) |immediates| {
+            const active_immediates_tag = std.meta.activeTag(immediates);
+            const immediates_type_info: std.builtin.Type.Union = @typeInfo(InstructionImmediates);
+            const active_field: std.builtin.Type.UnionField = immediates_type_info.fields[@enumFromInt(active_immediates_tag)];
+
+            const alignment = active_field.alignment;
+            const offset_to_immediates = std.mem.alignForward(usize, stream.data.items.len, alignment);
+
+            Helpers.pad(offset_to_immediates);
+
+            const size = @sizeOf(active_field.type);
+            var immediates_bytes: u8 = std.mem.asBytes(&immediates)[0..size]; // TODO verify this works
+
+            writer.write(immediates_bytes) catch return AllocError.OutOfMemory;
+        }
+
+        const offset_to_registers = std.mem.alignForward(usize, stream.data.items.len, @alignOf(u32));
+        Helpers.pad(offset_to_registers);
+
+        writer.writeIntNative(u32, registers.len) catch return AllocError.OutOfMemory;
+        writer.write(std.mem.sliceAsBytes(registers)) catch return AllocError.OutOfMemory;
+    }
+
+    fn reader(stream: InstructionStream, begin_pos: usize) InstructionStreamReader {
+        var fbo_reader = std.io.fixedBufferStream(stream.data.items);
+        fbo_reader.context.pos = begin_pos;
+
+        return .{
+            .reader = fbo_reader,
+        };
+    }
+
+    fn readerFromFunc(stream: InstructionStream, func: FunctionInstance) InstructionStreamReader {
+        return stream.reader(func.instructions_begin, func.instructions_end);
+    }
+};
+
+const InstructionStreamReader = struct {
+    reader: InstructionStream.InnerReaderType,
+
+    fn alignReadPos(self: *InstructionStreamReader, alignment: usize) void {
+        self.reader.context.pos = std.mem.alignForward(usize, self.reader.context.pos, alignment);
+    }
+
+    fn readOpcode(self: *InstructionStreamReader) Opcode {
+        self.alignReadPos(@alignOf(Opcode));
+        return self.reader.readEnum(Opcode, .Little) catch unreachable;
+    }
+
+    fn readImmediates(self: *InstructionStreamReader, opcode: Opcode) ?InstructionImmediates {
+        const maybe_type: ?type = switch (opcode) {
+            else => return null,
+        };
+
+        if (maybe_type) |immediate_type| {
+            self.alignReadPos(@alignOf(immediate_type));
+
+            const size = @sizeOf(immediate_type);
+            var immediates: InstructionImmediates = undefined;
+            var immediates_bytes: []u8 = std.mem.asBytes(&immediates)[0..size];
+            self.reader.read(immediates_bytes) catch unreachable;
+
+            return immediates;
+        } else {
+            return null;
+        }
+    }
+
+    fn readRegisters(self: *InstructionStreamReader) []u32 {
+        self.alignReadPos(@alignOf(u32));
+
+        const num_registers = self.reader.readIntNative(u32) catch unreachable;
+
+        const begin = self.reader.context.pos;
+        const end = begin + num_registers * @sizeOf(u32);
+        const registers_bytes: []u8 = self.reader.context.buffer[begin..end];
+        const registers = std.mem.bytesAsSlice(u32, registers_bytes);
+        return registers;
+    }
+};
+
+test "register instruction stream" {
+    const allocator = std.testing.allocator;
+
+    const TestData = struct {
+        opcode: Opcode,
+        immediates: ?InstructionImmediates,
+        registers: []u32,
+    };
+
+    const test_data = [_]TestData{
+        .{
+            .opcode = .I32_Const,
+            .immediates = InstructionImmediates{ .ValueI32 = 0x1337 },
+            .registers = &[_]u32{0},
+        },
+        .{
+            .opcode = .Noop,
+            .immediates = null,
+            .registers = &[_]u32{},
+        },
+        .{
+            .opcode = .Call,
+            .immediates = InstructionImmediates{ .Index = 12 },
+            .registers = &[_]u32{ 1, 2, 3 },
+        },
+        .{
+            .opcode = .Call,
+            .immediates = InstructionImmediates{ .Index = 12 },
+            .registers = &[_]u32{ 1, 2, 3 },
+        },
+    };
+
+    var stream = InstructionStream{
+        .data = std.ArrayList(u8).init(allocator),
+    };
+    defer stream.data.deinit();
+
+    for (test_data) |data| {
+        try stream.emit(data.opcode, data.immediates, data.registers);
+    }
+
+    var reader = stream.reader(0);
+    for (test_data) |expected| {
+        var opcode = reader.readOpcode();
+        std.testing.expectEqual(expected.opcode, opcode);
+
+        var immediates: ?InstructionImmediates = reader.readImmediates(opcode);
+        std.testing.expectEqual(expected.immediates, immediates);
+
+        var registers = reader.readRegisters();
+        std.testing.expectEqual(expected.registers, registers);
+    }
+}
+
 const FunctionStore = struct {
     local_types: std.ArrayList(ValType),
-    instructions: std.ArrayList(RegInstruction),
+    instructions: InstructionStream,
     instances: std.ArrayList(FunctionInstance),
+
+    fn init(allocator: std.mem.Allocator) FunctionStore {
+        return .{
+            .local_types = std.ArrayList(ValType).init(allocator),
+            .instructions = std.ArrayList(RegInstruction).init(allocator),
+            .instances = std.ArrayList(FunctionInstance).init(allocator),
+        };
+    }
+
+    fn deinit(store: *FunctionStore) void {
+        store.local_types.deinit();
+        store.instructions.deinit();
+        store.instances.deinit();
+    }
 };
 
 pub const RegisterVM = struct {
@@ -1440,7 +1609,11 @@ fn runTestWithViz(wasm_filepath: []const u8, viz_dir: []const u8) !void {
 
     var compiler = FunctionCompiler.init(allocator, module_def);
     defer compiler.deinit();
-    try compiler.compile();
+
+    var store = FunctionStore.init(allocator);
+    defer store.deinit();
+
+    try compiler.compile(&store);
     for (compiler.functions.items, 0..) |func, i| {
         var viz_path_buffer: [256]u8 = undefined;
         const viz_path = std.fmt.bufPrint(&viz_path_buffer, "{s}\\viz_{}.txt", .{ viz_dir, i }) catch unreachable;
@@ -1489,15 +1662,15 @@ fn runTestWithViz(wasm_filepath: []const u8, viz_dir: []const u8) !void {
 //     // }
 // }
 
-// test "ir2" {
-//     const filename =
-//         // \\E:\Dev\zig_projects\bytebox\test\wasm\br_table\br_table.0.wasm
-//         \\E:\Dev\zig_projects\bytebox\test\reg\add.wasm
-//         // \\E:\Dev\third_party\zware\test\fact.wasm
-//         // \\E:\Dev\zig_projects\bytebox\test\wasm\i32\i32.0.wasm
-//     ;
-//     const viz_dir =
-//         \\E:\Dev\zig_projects\bytebox\test\reg\
-//     ;
-//     try runTestWithViz(filename, viz_dir);
-// }
+test "ir2" {
+    const filename =
+        // \\E:\Dev\zig_projects\bytebox\test\wasm\br_table\br_table.0.wasm
+        \\E:\Dev\zig_projects\bytebox\test\reg\add.wasm
+        // \\E:\Dev\third_party\zware\test\fact.wasm
+        // \\E:\Dev\zig_projects\bytebox\test\wasm\i32\i32.0.wasm
+    ;
+    const viz_dir =
+        \\E:\Dev\zig_projects\bytebox\test\reg\
+    ;
+    try runTestWithViz(filename, viz_dir);
+}

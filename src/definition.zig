@@ -738,34 +738,44 @@ const MemArg = struct {
     }
 };
 
-pub const MemoryOffsetAndLaneImmediates = struct {
+pub const MemoryOffsetAndLaneImmediates = packed struct {
     offset: u32,
     laneidx: u8,
 };
 
-pub const CallIndirectImmediates = struct {
+pub const CallIndirectImmediates = packed struct {
     type_index: u32,
     table_index: u32,
 };
 
-pub const BranchTableImmediates = struct {
+pub const BranchTableImmediates = packed struct {
     label_ids: std.ArrayList(u32), // TODO optimize to make less allocations
     fallback_id: u32,
 };
 
-pub const TablePairImmediates = struct {
+pub const TablePairImmediates = packed struct {
     index_x: u32,
     index_y: u32,
 };
 
-pub const BlockImmediates = struct {
-    blocktype: BlockTypeValue,
+pub const BlockImmediates = packed struct {
+    // blocktype: BlockTypeValue,
+    block_type: BlockType,
+    block_value: packed union {
+        ValType: ValType,
+        TypeIndex: u32,
+    },
     num_returns: u32,
     continuation: u32,
 };
 
-pub const IfImmediates = struct {
-    blocktype: BlockTypeValue,
+pub const IfImmediates = packed struct {
+    // blocktype: BlockTypeValue,
+    block_type: BlockType,
+    block_value: packed union {
+        ValType: ValType,
+        TypeIndex: u32,
+    },
     num_returns: u32,
     else_continuation: u32,
     end_continuation: u32,
