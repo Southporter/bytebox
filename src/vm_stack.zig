@@ -369,7 +369,7 @@ const Stack = struct {
         return null;
     }
 
-    fn topFrame(stack: Stack) *CallFrame {
+    pub fn topFrame(stack: Stack) *CallFrame {
         return &stack.frames[stack.num_frames - 1];
     }
 
@@ -5250,7 +5250,7 @@ pub const StackVM = struct {
     debug_state: ?DebugState,
     meter_state: MeterState,
 
-    fn fromVM(vm: *VM) *StackVM {
+    pub fn fromVM(vm: *VM) *StackVM {
         return @as(*StackVM, @alignCast(@ptrCast(vm.impl)));
     }
 
