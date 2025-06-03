@@ -63,6 +63,8 @@ pub fn createModuleDefinition(allocator: std.mem.Allocator, opts: ModuleDefiniti
     return try ModuleDefinition.create(allocator, opts);
 }
 
+pub const StackVM = vm_stack.StackVM;
+
 pub const VmType = enum {
     Stack,
     Register,
