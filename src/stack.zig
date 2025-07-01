@@ -79,10 +79,14 @@ const metering = @import("metering.zig");
 pub const FunctionInstance = struct {
     type_def_index: usize,
     def_index: usize,
+    code: [*]const Instruction,
     instructions_begin: usize,
     num_locals: u32,
     num_params: u16,
     num_returns: u16,
+
+    max_values: u32,
+    max_labels: u32,
 };
 
 pub const Label = struct {
@@ -161,12 +165,6 @@ pub const Stack = struct {
         stack.frames.len = opts.max_frames;
     }
 
-    pub fn checkExhausted(stack: *Stack, comptime extra_values: u32) !void {
-        if (stack.num_values + extra_values >= stack.values.len) {
-            return error.TrapStackExhausted;
-        }
-    }
-
     pub fn pushValue(stack: *Stack, value: Val) void {
         stack.values[stack.num_values] = value;
         stack.num_values += 1;
@@ -241,17 +239,15 @@ pub const Stack = struct {
         };
     }
 
-    pub fn pushLabel(stack: *Stack, num_returns: u32, continuation: u32) !void {
-        if (stack.num_labels < stack.labels.len) {
-            stack.labels[stack.num_labels] = Label{
-                .num_returns = num_returns,
-                .continuation = continuation,
-                .start_offset_values = stack.num_values,
-            };
-            stack.num_labels += 1;
-        } else {
-            return error.TrapStackExhausted;
-        }
+    pub fn pushLabel(stack: *Stack, num_returns: u32, continuation: u32) void {
+        std.debug.assert(stack.num_labels < stack.labels.len);
+
+        stack.labels[stack.num_labels] = Label{
+            .num_returns = num_returns,
+            .continuation = continuation,
+            .start_offset_values = stack.num_values,
+        };
+        stack.num_labels += 1;
     }
 
     pub fn popLabel(stack: *Stack) void {
@@ -300,46 +296,64 @@ pub const Stack = struct {
     }
 
     pub fn pushFrame(stack: *Stack, func: *const FunctionInstance, module_instance: *ModuleInstance) TrapError!void {
+        // check stack exhaustion
+        if (stack.frames.len <= stack.num_frames + 1) {
+            @branchHint(std.builtin.BranchHint.cold);
+            return error.TrapStackExhausted;
+        }
+        if (stack.values.len <= stack.num_values + func.max_values) {
+            @branchHint(std.builtin.BranchHint.cold);
+            return error.TrapStackExhausted;
+        }
+        if (stack.labels.len <= stack.num_labels + func.max_labels) {
+            @branchHint(std.builtin.BranchHint.cold);
+            return error.TrapStackExhausted;
+        }
+
         // the stack should already be populated with the params to the function, so all that's
         // left to do is initialize the locals to their default values
         const values_index_begin: u32 = stack.num_values - func.num_params;
         const values_index_end: u32 = stack.num_values + func.num_locals;
 
-        if (stack.num_frames < stack.frames.len and values_index_end < stack.values.len) {
-            const locals_and_params: []Val = stack.values[values_index_begin..values_index_end];
-            const locals = stack.values[stack.num_values..values_index_end];
+        std.debug.assert(stack.num_frames < stack.frames.len);
+        std.debug.assert(values_index_end < stack.values.len);
 
-            stack.num_values = values_index_end;
+        const locals_and_params: []Val = stack.values[values_index_begin..values_index_end];
+        const locals = stack.values[stack.num_values..values_index_end];
 
-            @memset(std.mem.sliceAsBytes(locals), 0);
+        stack.num_values = values_index_end;
 
-            stack.frames[stack.num_frames] = CallFrame{
-                .func = func,
-                .module_instance = module_instance,
-                .locals = locals_and_params,
-                .num_returns = func.num_returns,
-                .start_offset_values = values_index_begin,
-                .start_offset_labels = stack.num_labels,
-            };
-            stack.num_frames += 1;
-        } else {
-            return error.TrapStackExhausted;
-        }
+        // All locals must be initialized to their default value
+        // https://webassembly.github.io/spec/core/exec/instructions.html#exec-invoke
+        @memset(std.mem.sliceAsBytes(locals), 0);
+
+        stack.frames[stack.num_frames] = CallFrame{
+            .func = func,
+            .module_instance = module_instance,
+            .locals = locals_and_params,
+            .num_returns = func.num_returns,
+            .start_offset_values = values_index_begin,
+            .start_offset_labels = stack.num_labels,
+        };
+        stack.num_frames += 1;
     }
 
     pub fn popFrame(stack: *Stack) ?FuncCallData {
         const frame: *CallFrame = stack.topFrame();
-        const frame_label: Label = stack.labels[frame.start_offset_labels];
 
+        const continuation: u32 = stack.labels[frame.start_offset_labels].continuation;
         const num_returns: usize = frame.num_returns;
         const source_begin: usize = stack.num_values - num_returns;
         const source_end: usize = stack.num_values;
         const dest_begin: usize = frame.start_offset_values;
         const dest_end: usize = frame.start_offset_values + num_returns;
+        assert(dest_begin <= source_begin);
 
+        // Because a function's locals take up stack space, the return values are located
+        // after the locals, so we need to copy them back down to the start of the function's
+        // stack space, where the caller expects them to be.
         const returns_source: []const Val = stack.values[source_begin..source_end];
         const returns_dest: []Val = stack.values[dest_begin..dest_end];
-        assert(dest_begin <= source_begin);
         std.mem.copyForwards(Val, returns_dest, returns_source);
 
         stack.num_values = @as(u32, @intCast(dest_end));
@@ -348,8 +362,8 @@ pub const Stack = struct {
 
         if (stack.num_frames > 0) {
             return FuncCallData{
-                .code = stack.topFrame().module_instance.module_def.code.instructions.items.ptr,
-                .continuation = frame_label.continuation,
+                .code = stack.topFrame().func.code,
+                .continuation = continuation,
             };
         }
 
@@ -410,10 +424,10 @@ fn traceInstruction(instruction_name: []const u8, pc: u32, stack: *const Stack) 
     }
 }
 pub fn preamble(comptime Vm: type, name: []const u8, pc: u32, code: [*]const Instruction, stack: *Stack) TrapError!void {
-    const root_module_instance: *ModuleInstance = stack.frames[0].module_instance;
-    const root_stackvm: *Vm = Vm.fromVM(root_module_instance.vm);
-
     if (metering.enabled) {
+        const root_module_instance: *ModuleInstance = stack.frames[0].module_instance;
+        const root_stackvm = Vm.fromVM(root_module_instance.vm);
+
         if (root_stackvm.meter_state.enabled) {
             const meter = metering.reduce(root_stackvm.meter_state.meter, code[pc]);
             root_stackvm.meter_state.meter = meter;
@@ -426,6 +440,9 @@ pub fn preamble(comptime Vm: type, name: []const u8, pc: u32, code: [*]const Ins
     }
 
     if (config.enable_debug_trap) {
+        const root_module_instance: *ModuleInstance = stack.frames[0].module_instance;
+        const root_stackvm = Vm.fromVM(root_module_instance.vm);
+
         if (root_stackvm.debug_state) |*debug_state| {
             if (debug_state.trap_counter > 0) {
                 debug_state.trap_counter -= 1;
@@ -627,8 +644,7 @@ pub const OpHelpers = struct {
         std.mem.writeInt(write_type, mem[0..byte_count], write_value, .little);
     }
 
-    pub fn memSize(stack: *Stack) !void {
-        try stack.checkExhausted(1);
+    pub fn memSize(stack: *Stack) void {
         const memory_index: usize = 0;
         var memory_instance: *const MemoryInstance = stack.topFrame().module_instance.store.getMemory(memory_index);
 
@@ -664,73 +680,74 @@ pub const OpHelpers = struct {
         }
     }
 
-    pub fn call(comptime Vm: type, stack: *Stack, pc: u32, code: [*]const Instruction) anyerror!FuncCallData {
+    pub fn callLocal(comptime Vm: type, stack: *Stack, pc: u32, code: [*]const Instruction) anyerror!FuncCallData {
         const func_index: u32 = code[pc].immediate.Index;
         const module_instance: *ModuleInstance = stack.topFrame().module_instance;
-        const store: *const Store = &module_instance.store;
         const stack_vm = Vm.fromVM(module_instance.vm);
 
-        if (func_index >= store.imports.functions.items.len) {
-            const func_instance_index = func_index - store.imports.functions.items.len;
-            const func: *const FunctionInstance = &stack_vm.functions.items[@as(usize, @intCast(func_instance_index))];
-            return OpHelpers.callInternal(pc, stack, module_instance, func);
-        } else {
-            const func_import = &store.imports.functions.items[func_index];
-            return OpHelpers.callImport(Vm, pc, stack, func_import);
-        }
+        std.debug.assert(func_index < stack_vm.functions.items.len);
+
+        const func: *const FunctionInstance = &stack_vm.functions.items[@as(usize, @intCast(func_index))];
+        return call(pc, stack, module_instance, func);
     }
 
-    fn callInternal(pc: u32, stack: *Stack, module_instance: *ModuleInstance, func: *const FunctionInstance) TrapError!FuncCallData {
+    fn call(pc: u32, stack: *Stack, module_instance: *ModuleInstance, func: *const FunctionInstance) TrapError!FuncCallData {
         const continuation: u32 = pc + 1;
         try stack.pushFrame(func, module_instance);
-        try stack.pushLabel(func.num_returns, continuation);
+        stack.pushLabel(func.num_returns, continuation);
 
         DebugTrace.traceFunction(module_instance, stack.num_frames, func.def_index);
 
         return FuncCallData{
-            .code = module_instance.module_def.code.instructions.items.ptr,
+            .code = func.code,
             .continuation = @intCast(func.instructions_begin),
         };
     }
 
-    pub fn callImport(comptime Vm: type, pc: u32, stack: *Stack, func: *const FunctionImport) (TrapError || HostFunctionError)!FuncCallData {
+    pub fn callImport(comptime Vm: type, stack: *Stack, pc: u32, code: [*]const Instruction) (TrapError || HostFunctionError)!FuncCallData {
+        const func_index: u32 = code[pc].immediate.Index;
+        const module_instance: *ModuleInstance = stack.topFrame().module_instance;
+        const store: *const Store = &module_instance.store;
+
+        std.debug.assert(func_index < store.imports.functions.items.len);
+
+        const func = &store.imports.functions.items[func_index];
+
         switch (func.data) {
             .Host => |data| {
                 const params_len: u32 = @as(u32, @intCast(data.func_def.getParams().len));
                 const returns_len: u32 = @as(u32, @intCast(data.func_def.calcNumReturns()));
 
-                if (stack.num_values + returns_len < stack.values.len) {
-                    const module: *ModuleInstance = stack.topFrame().module_instance;
-                    const params = stack.values[stack.num_values - params_len .. stack.num_values];
-                    const returns_temp = stack.values[stack.num_values .. stack.num_values + returns_len];
+                std.debug.assert(stack.num_values + returns_len < stack.values.len);
 
-                    DebugTrace.traceHostFunction(module, stack.num_frames + 1, func.name);
+                const module: *ModuleInstance = stack.topFrame().module_instance;
+                const params = stack.values[stack.num_values - params_len .. stack.num_values];
+                const returns_temp = stack.values[stack.num_values .. stack.num_values + returns_len];
 
-                    try data.callback(data.userdata, module, params.ptr, returns_temp.ptr);
+                DebugTrace.traceHostFunction(module, stack.num_frames + 1, func.name);
 
-                    stack.num_values = (stack.num_values - params_len) + returns_len;
-                    const returns_dest = stack.values[stack.num_values - returns_len .. stack.num_values];
+                try data.callback(data.userdata, module, params.ptr, returns_temp.ptr);
 
-                    if (params_len > 0) {
-                        assert(@intFromPtr(returns_dest.ptr) < @intFromPtr(returns_temp.ptr));
-                        std.mem.copyForwards(Val, returns_dest, returns_temp);
-                    } else {
-                        // no copy needed in this case since the return values will go into the same location
-                        assert(returns_dest.ptr == returns_temp.ptr);
-                    }
+                stack.num_values = (stack.num_values - params_len) + returns_len;
+                const returns_dest = stack.values[stack.num_values - returns_len .. stack.num_values];
 
-                    return FuncCallData{
-                        .code = stack.topFrame().module_instance.module_def.code.instructions.items.ptr,
-                        .continuation = pc + 1,
-                    };
+                if (params_len > 0) {
+                    assert(@intFromPtr(returns_dest.ptr) < @intFromPtr(returns_temp.ptr));
+                    std.mem.copyForwards(Val, returns_dest, returns_temp);
                 } else {
-                    return error.TrapStackExhausted;
+                    // no copy needed in this case since the return values will go into the same location
+                    assert(returns_dest.ptr == returns_temp.ptr);
                 }
+
+                return FuncCallData{
+                    .code = stack.topFrame().module_instance.module_def.code.instructions.items.ptr,
+                    .continuation = pc + 1,
+                };
             },
             .Wasm => |data| {
-                var stack_vm: *Vm = Vm.fromVM(data.module_instance.vm);
+                var stack_vm = Vm.fromVM(data.module_instance.vm);
                 const func_instance: *const FunctionInstance = &stack_vm.functions.items[data.index];
-                return callInternal(pc, stack, data.module_instance, func_instance);
+                return try call(pc, stack, data.module_instance, func_instance);
             },
         }
     }
@@ -771,21 +788,21 @@ pub const OpHelpers = struct {
                     return error.TrapIndirectCallTypeMismatch;
                 }
             }
-            return callInternal(pc, stack, call_module, func);
+            return call(pc, stack, call_module, func);
         } else {
             var func_import: *const FunctionImport = &call_store.imports.functions.items[func_index];
             const func_type_def: *const FunctionTypeDefinition = &call_module.module_def.types.items[immediates.type_index];
             if (func_import.isTypeSignatureEql(func_type_def) == false) {
                 return error.TrapIndirectCallTypeMismatch;
             }
-            return try OpHelpers.callImport(Vm, pc, stack, func_import);
+            return callImport(Vm, stack, pc, code);
         }
     }
 
     pub fn ifCond(stack: *Stack, pc: u32, code: [*]const Instruction) !u32 {
         const condition = stack.popI32();
         const immediate = code[pc].immediate.If;
-        try stack.pushLabel(immediate.num_returns, immediate.end_continuation);
+        stack.pushLabel(immediate.num_returns, immediate.end_continuation);
         if (condition != 0) {
             return pc + 1;
         } else {
@@ -797,7 +814,7 @@ pub const OpHelpers = struct {
         const condition = stack.popI32();
         const immediate = code[pc].immediate.If;
         if (condition != 0) {
-            try stack.pushLabel(immediate.num_returns, immediate.end_continuation);
+            stack.pushLabel(immediate.num_returns, immediate.end_continuation);
             return pc + 1;
         } else {
             return immediate.else_continuation + 1;
@@ -877,8 +894,7 @@ pub const OpHelpers = struct {
         return next;
     }
 
-    pub fn localGet(stack: *Stack, instruction: Instruction) !void {
-        try stack.checkExhausted(1);
+    pub fn localGet(stack: *Stack, instruction: Instruction) void {
         const locals_index: u32 = instruction.immediate.Index;
         const top_frame: *const CallFrame = stack.topFrame();
         const v: Val = top_frame.locals[locals_index];
@@ -899,8 +915,7 @@ pub const OpHelpers = struct {
         top_frame.locals[locals_index] = v;
     }
 
-    pub fn globalGet(stack: *Stack, instruction: Instruction) !void {
-        try stack.checkExhausted(1);
+    pub fn globalGet(stack: *Stack, instruction: Instruction) void {
         const global_index: u32 = instruction.immediate.Index;
         const global: *GlobalInstance = stack.topFrame().module_instance.store.getGlobal(global_index);
         stack.pushValue(global.value);
@@ -961,26 +976,22 @@ pub const OpHelpers = struct {
         stack.pushV128(@as(v128, @bitCast(result)));
     }
 
-    pub fn i32Const(stack: *Stack, instruction: Instruction) !void {
-        try stack.checkExhausted(1);
+    pub fn i32Const(stack: *Stack, instruction: Instruction) void {
         const v: i32 = instruction.immediate.ValueI32;
         stack.pushI32(v);
     }
 
-    pub fn i64Const(stack: *Stack, instruction: Instruction) !void {
-        try stack.checkExhausted(1);
+    pub fn i64Const(stack: *Stack, instruction: Instruction) void {
         const v: i64 = instruction.immediate.ValueI64;
         stack.pushI64(v);
     }
 
-    pub fn f32Const(stack: *Stack, instruction: Instruction) !void {
-        try stack.checkExhausted(1);
+    pub fn f32Const(stack: *Stack, instruction: Instruction) void {
         const v: f32 = instruction.immediate.ValueF32;
         stack.pushF32(v);
     }
 
-    pub fn f64Const(stack: *Stack, instruction: Instruction) !void {
-        try stack.checkExhausted(1);
+    pub fn f64Const(stack: *Stack, instruction: Instruction) void {
         const v: f64 = instruction.immediate.ValueF64;
         stack.pushF64(v);
     }

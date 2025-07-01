@@ -589,6 +589,7 @@ pub const FunctionDefinition = struct {
     instructions_end: usize,
     continuation: usize,
     locals: std.ArrayList(ValType), // TODO use a slice of a large contiguous array instead
+    stack_stats: FunctionStackStats = .{},
 
     pub fn instructions(func: FunctionDefinition, module_def: ModuleDefinition) []Instruction {
         return module_def.code.instructions.items[func.instructions_begin..func.instructions_end];
@@ -919,10 +920,11 @@ pub const Instruction = struct {
         };
 
         const wasm_op: WasmOpcode = try WasmOpcode.decode(reader);
-        const opcode: Opcode = wasm_op.toOpcode();
+
+        var opcode: ?Opcode = null;
         var immediate = InstructionImmediates{ .Void = {} };
 
-        switch (opcode) {
+        switch (wasm_op) {
             .Select_T => {
                 const num_types = try common.decodeLEB128(u32, reader);
                 if (num_types != 1) {
@@ -981,7 +983,6 @@ pub const Instruction = struct {
                     },
                 };
             },
-            .IfNoElse => unreachable, // we convert the If opcode to IfNoElse only after reaching the end of the block, not when decoding the opcode and immediates
             .Branch => {
                 immediate = InstructionImmediates{ .LabelId = try common.decodeLEB128(u32, reader) };
             },
@@ -1032,7 +1033,15 @@ pub const Instruction = struct {
                 }
             },
             .Call => {
-                immediate = InstructionImmediates{ .Index = try common.decodeLEB128(u32, reader) }; // function index
+                var index = try common.decodeLEB128(u32, reader);
+                if (module.imports.functions.items.len <= index) {
+                    index -= @intCast(module.imports.functions.items.len);
+                    opcode = .Call_Local;
+                } else {
+                    opcode = .Call_Import;
+                }
+
+                immediate = InstructionImmediates{ .Index = index }; // function index
             },
             .Call_Indirect => {
                 immediate = InstructionImmediates{ .CallIndirect = .{
@@ -1291,8 +1300,13 @@ pub const Instruction = struct {
             else => {},
         }
 
+        // if the wasm opcode wasn't already translated to the internal opcode, use the default translation
+        if (opcode == null) {
+            opcode = wasm_op.toOpcode();
+        }
+
         return .{
-            .opcode = opcode,
+            .opcode = opcode.?,
             .immediate = immediate,
         };
     }
@@ -1431,13 +1445,17 @@ pub const NameCustomSection = struct {
     // }
 };
 
+pub const FunctionStackStats = struct {
+    values: usize = 0,
+    labels: usize = 0,
+};
+
 const ModuleValidator = struct {
     const ControlFrame = struct {
         opcode: Opcode,
         start_types: []const ValType,
         end_types: []const ValType,
         types_stack_height: usize,
-        is_function: bool,
         is_unreachable: bool,
     };
 
@@ -1447,6 +1465,9 @@ const ModuleValidator = struct {
     control_stack: std.ArrayList(ControlFrame),
     control_types: StableArray(ValType),
     log: Logger,
+
+    // tracks stack usage per-function
+    stack_stats: FunctionStackStats = .{},
 
     fn init(allocator: std.mem.Allocator, log: Logger) ModuleValidator {
         return ModuleValidator{
@@ -1521,9 +1542,10 @@ const ModuleValidator = struct {
     fn beginValidateCode(self: *ModuleValidator, module: *const ModuleDefinition, func: *const FunctionDefinition) !void {
         try validateTypeIndex(func.type_index, module);
 
+        self.stack_stats = .{};
         const func_type_def: *const FunctionTypeDefinition = &module.types.items[func.type_index];
 
-        try self.pushControl(Opcode.Call, func_type_def.getParams(), func_type_def.getReturns());
+        try self.pushControl(Opcode.Call_Local, func_type_def.getParams(), func_type_def.getReturns());
     }
 
     fn validateCode(self: *ModuleValidator, module: *const ModuleDefinition, func: *const FunctionDefinition, instruction: Instruction) !void {
@@ -1558,17 +1580,14 @@ const ModuleValidator = struct {
             fn getLocalValtype(validator: *const ModuleValidator, module_: *const ModuleDefinition, func_: *const FunctionDefinition, locals_index: u64) !ValType {
                 var i = validator.control_stack.items.len - 1;
                 while (i >= 0) : (i -= 1) {
-                    const frame: *const ControlFrame = &validator.control_stack.items[i];
-                    if (frame.is_function) {
-                        const func_type: *const FunctionTypeDefinition = &module_.types.items[func_.type_index];
-                        if (locals_index < func_type.num_params) {
-                            return func_type.getParams()[@intCast(locals_index)];
-                        } else {
-                            if (func_.locals.items.len <= locals_index - func_type.num_params) {
-                                return error.ValidationUnknownLocal;
-                            }
-                            return func_.locals.items[@as(usize, @intCast(locals_index)) - func_type.num_params];
+                    const func_type: *const FunctionTypeDefinition = &module_.types.items[func_.type_index];
+                    if (locals_index < func_type.num_params) {
+                        return func_type.getParams()[@intCast(locals_index)];
+                    } else {
+                        if (func_.locals.items.len <= locals_index - func_type.num_params) {
+                            return error.ValidationUnknownLocal;
                         }
+                        return func_.locals.items[@as(usize, @intCast(locals_index)) - func_type.num_params];
                     }
                 }
                 unreachable;
@@ -1797,9 +1816,23 @@ const ModuleValidator = struct {
                 try Helpers.popReturnTypes(self, block_return_types);
                 try Helpers.markFrameInstructionsUnreachable(self);
             },
-            .Call => {
+            .Call_Local => {
+                const local_func_index: u64 = instruction.immediate.Index;
+                if (module.functions.items.len <= local_func_index) {
+                    return error.ValidationUnknownFunction;
+                }
+
+                // Local functions' index space is located after the imports, but the Call_Local instruction immediate
+                // has been setup to point directly into the local function index space.
+                const func_index = module.imports.functions.items.len + local_func_index;
+                std.debug.assert(func_index < std.math.maxInt(usize));
+
+                const type_index: usize = module.getFuncTypeIndex(@intCast(func_index));
+                try Helpers.popPushFuncTypes(self, type_index, module);
+            },
+            .Call_Import => {
                 const func_index: u64 = instruction.immediate.Index;
-                if (module.imports.functions.items.len + module.functions.items.len <= func_index) {
+                if (module.imports.functions.items.len <= func_index) {
                     return error.ValidationUnknownFunction;
                 }
 
@@ -2537,14 +2570,17 @@ const ModuleValidator = struct {
         }
     }
 
-    fn endValidateCode(self: *ModuleValidator) !void {
+    fn endValidateCode(self: *ModuleValidator) !FunctionStackStats {
         try self.type_stack.resize(0);
         try self.control_stack.resize(0);
         try self.control_types.resize(0);
+        return self.stack_stats;
     }
 
     fn pushType(self: *ModuleValidator, valtype: ?ValType) !void {
         try self.type_stack.append(valtype);
+
+        self.stack_stats.values = @max(self.stack_stats.values, self.type_stack.items.len);
     }
 
     fn popAnyType(self: *ModuleValidator) !?ValType {
@@ -2585,14 +2621,15 @@ const ModuleValidator = struct {
             .start_types = control_start_types,
             .end_types = control_end_types,
             .types_stack_height = self.type_stack.items.len,
-            .is_function = true,
             .is_unreachable = false,
         });
 
-        if (opcode != .Call) {
+        if (opcode != .Call_Local) {
             for (start_types) |valtype| {
                 try self.pushType(valtype);
             }
+            // -1 because the first control frame is always a .Call, which is not a label
+            self.stack_stats.labels = @max(self.stack_stats.labels, self.control_stack.items.len - 1);
         }
     }
 
@@ -3336,7 +3373,7 @@ pub const ModuleDefinition = struct {
                             }
                         }
 
-                        try validator.endValidateCode();
+                        func_def.stack_stats = try validator.endValidateCode();
 
                         func_def.instructions_end = @intCast(instructions.items.len);
 

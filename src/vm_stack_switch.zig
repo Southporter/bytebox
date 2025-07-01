@@ -158,14 +158,22 @@ pub const StackVM = struct {
         for (module.module_def.functions.items, 0..) |*def_func, i| {
             const func_type: *const FunctionTypeDefinition = &module.module_def.types.items[def_func.type_index];
             const param_types: []const ValType = func_type.getParams();
+            const num_locals: u32 = @intCast(def_func.locals.items.len);
+            const num_params: u16 = @intCast(param_types.len);
+            const num_values: u32 = @intCast(def_func.stack_stats.values);
 
             const f = FunctionInstance{
                 .type_def_index = def_func.type_index,
+                .code = module.module_def.code.instructions.items.ptr,
                 .def_index = @as(u32, @intCast(i)),
                 .instructions_begin = def_func.instructions_begin,
                 .num_locals = @intCast(def_func.locals.items.len),
                 .num_params = @intCast(param_types.len),
                 .num_returns = @intCast(func_type.getReturns().len),
+
+                // maximum number of values that can be on the stack for this function
+                .max_values = num_values + num_locals + num_params,
+                .max_labels = @intCast(def_func.stack_stats.labels),
             };
             try self.functions.append(f);
         }
@@ -360,7 +368,7 @@ pub const StackVM = struct {
         }
 
         try self.stack.pushFrame(&func, module);
-        try self.stack.pushLabel(func.num_returns, @intCast(func_def.continuation));
+        self.stack.pushLabel(func.num_returns, @intCast(func_def.continuation));
 
         DebugTrace.traceFunction(module, self.stack.num_frames, func.def_index);
 
@@ -400,14 +408,14 @@ pub const StackVM = struct {
             Opcode.Block => {
                 try preamble("Block", pc, code, stack);
                 const block = code[pc].immediate.Block;
-                try stack.pushLabel(block.num_returns, block.continuation);
+                stack.pushLabel(block.num_returns, block.continuation);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
             Opcode.Loop => {
                 try preamble("Loop", pc, code, stack);
                 const block = code[pc].immediate.Block;
-                try stack.pushLabel(block.num_returns, block.continuation);
+                stack.pushLabel(block.num_returns, block.continuation);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
@@ -468,10 +476,10 @@ pub const StackVM = struct {
                 continue :interpret code[pc].opcode;
             },
 
-            Opcode.Call => {
+            Opcode.Call_Local => {
                 try preamble("Call", pc, code, stack);
 
-                const next = try OpHelpers.call(StackVM, stack, pc, code);
+                const next = try OpHelpers.callLocal(StackVM, stack, pc, code);
 
                 pc = next.continuation;
                 code = next.code;
@@ -481,6 +489,14 @@ pub const StackVM = struct {
             Opcode.Call_Indirect => {
                 try preamble("Call_Indirect", pc, code, stack);
                 const next = try OpHelpers.callIndirect(StackVM, stack, pc, code);
+                pc = next.continuation;
+                code = next.code;
+                continue :interpret code[pc].opcode;
+            },
+
+            Opcode.Call_Import => {
+                try preamble("Call_Import", pc, code, stack);
+                const next = try OpHelpers.callImport(StackVM, stack, pc, code);
                 pc = next.continuation;
                 code = next.code;
                 continue :interpret code[pc].opcode;
@@ -512,7 +528,7 @@ pub const StackVM = struct {
 
             Opcode.Local_Get => {
                 try preamble("Local_Get", pc, code, stack);
-                try OpHelpers.localGet(stack, code[pc]);
+                OpHelpers.localGet(stack, code[pc]);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
@@ -533,7 +549,7 @@ pub const StackVM = struct {
 
             Opcode.Global_Get => {
                 try preamble("Global_Get", pc, code, stack);
-                try OpHelpers.globalGet(stack, code[pc]);
+                OpHelpers.globalGet(stack, code[pc]);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
@@ -745,7 +761,7 @@ pub const StackVM = struct {
 
             Opcode.Memory_Size => {
                 try preamble("Memory_Size", pc, code, stack);
-                try OpHelpers.memSize(stack);
+                OpHelpers.memSize(stack);
 
                 pc += 1;
                 continue :interpret code[pc].opcode;
@@ -760,28 +776,28 @@ pub const StackVM = struct {
 
             Opcode.I32_Const => {
                 try preamble("I32_Const", pc, code, stack);
-                try OpHelpers.i32Const(stack, code[pc]);
+                OpHelpers.i32Const(stack, code[pc]);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I64_Const => {
                 try preamble("I64_Const", pc, code, stack);
-                try OpHelpers.i64Const(stack, code[pc]);
+                OpHelpers.i64Const(stack, code[pc]);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F32_Const => {
                 try preamble("F32_Const", pc, code, stack);
-                try OpHelpers.f32Const(stack, code[pc]);
+                OpHelpers.f32Const(stack, code[pc]);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F64_Const => {
                 try preamble("F64_Const", pc, code, stack);
-                try OpHelpers.f64Const(stack, code[pc]);
+                OpHelpers.f64Const(stack, code[pc]);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
@@ -1902,7 +1918,6 @@ pub const StackVM = struct {
 
             Opcode.Ref_Null => {
                 try preamble("Ref_Null", pc, code, stack);
-                try stack.checkExhausted(1);
                 const valtype = code[pc].immediate.ValType;
                 const val = try Val.nullRef(valtype);
                 stack.pushValue(val);
@@ -1921,7 +1936,6 @@ pub const StackVM = struct {
 
             Opcode.Ref_Func => {
                 try preamble("Ref_Func", pc, code, stack);
-                try stack.checkExhausted(1);
                 const func_index: u32 = code[pc].immediate.Index;
                 const val = Val{ .FuncRef = .{ .index = func_index, .module_instance = stack.topFrame().module_instance } };
                 stack.pushValue(val);
@@ -2778,7 +2792,6 @@ pub const StackVM = struct {
 
             Opcode.V128_Const => {
                 try preamble("V128_Const", pc, code, stack);
-                try stack.checkExhausted(1);
                 const v: v128 = code[pc].immediate.ValueVec;
                 stack.pushV128(v);
                 pc += 1;

@@ -86,23 +86,6 @@ const OpHelpers = shared.OpHelpers;
 
 // TODO move all definition stuff into definition.zig and vm stuff into vm_stack.zig
 
-// new idea:
-// embed immediates with the opcodes in a stream of opaque data. each opcode knows how much data it uses and
-// increments the program counter by that amount. so it would look something like this:
-// op1
-// op1 immediate
-// op2 (no immediate)
-// op3
-// op3 imm1
-// op3 imm2
-// op3 imm3
-//
-// this way the opcode and immediate data is all in cache in the same stream, but there are no wasted bytes
-// due to union padding.
-// could experiment with adding alignment padding later
-
-// const InstructionFunc = *const fn (pc: u32, code: [*]const u8, stack: *Stack) anyerror!void;
-
 // pc is the "program counter", which points to the next instruction to execute
 const InstructionFunc = *const fn (pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void;
 
@@ -131,7 +114,8 @@ const InstructionFuncs = struct {
         &op_Branch_If,
         &op_Branch_Table,
         &op_Return,
-        &op_Call,
+        &op_Call_Local,
+        &op_Call_Import,
         &op_Call_Indirect,
         &op_Drop,
         &op_Select,
@@ -599,13 +583,13 @@ const InstructionFuncs = struct {
 
     fn op_Block(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
         try preamble("Block", pc, code, stack);
-        try stack.pushLabel(code[pc].immediate.Block.num_returns, code[pc].immediate.Block.continuation);
+        stack.pushLabel(code[pc].immediate.Block.num_returns, code[pc].immediate.Block.continuation);
         try @call(.always_tail, InstructionFuncs.lookup(code[pc + 1].opcode), .{ pc + 1, code, stack });
     }
 
     fn op_Loop(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
         try preamble("Loop", pc, code, stack);
-        try stack.pushLabel(code[pc].immediate.Block.num_returns, code[pc].immediate.Block.continuation);
+        stack.pushLabel(code[pc].immediate.Block.num_returns, code[pc].immediate.Block.continuation);
         try @call(.always_tail, InstructionFuncs.lookup(code[pc + 1].opcode), .{ pc + 1, code, stack });
     }
 
@@ -663,10 +647,17 @@ const InstructionFuncs = struct {
         try @call(.always_tail, InstructionFuncs.lookup(next.code[next.continuation].opcode), .{ next.continuation, next.code, stack });
     }
 
-    fn op_Call(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
+    fn op_Call_Local(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
+        try preamble("Call", pc, code, stack);
+        const next: FuncCallData = try OpHelpers.callLocal(StackVM, stack, pc, code);
+
+        try @call(.always_tail, InstructionFuncs.lookup(next.code[next.continuation].opcode), .{ next.continuation, next.code, stack });
+    }
+
+    fn op_Call_Import(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
         try preamble("Call", pc, code, stack);
 
-        const next = try OpHelpers.call(StackVM, stack, pc, code);
+        const next = try OpHelpers.callImport(StackVM, stack, pc, code);
 
         try @call(.always_tail, InstructionFuncs.lookup(next.code[next.continuation].opcode), .{ next.continuation, next.code, stack });
     }
@@ -719,7 +710,6 @@ const InstructionFuncs = struct {
 
     fn op_Local_Get(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
         try preamble("Local_Get", pc, code, stack);
-        try stack.checkExhausted(1);
         const locals_index: u32 = code[pc].immediate.Index;
         const frame: *const CallFrame = stack.topFrame();
         const v: Val = frame.locals[locals_index];
@@ -748,7 +738,6 @@ const InstructionFuncs = struct {
 
     fn op_Global_Get(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
         try preamble("Global_Get", pc, code, stack);
-        try stack.checkExhausted(1);
         const global_index: u32 = code[pc].immediate.Index;
         const global: *GlobalInstance = stack.topFrame().module_instance.store.getGlobal(global_index);
         stack.pushValue(global.value);
@@ -952,7 +941,6 @@ const InstructionFuncs = struct {
 
     fn op_Memory_Size(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
         try preamble("Memory_Size", pc, code, stack);
-        try stack.checkExhausted(1);
         const memory_index: usize = 0;
         var memory_instance: *const MemoryInstance = stack.topFrame().module_instance.store.getMemory(memory_index);
 
@@ -996,7 +984,6 @@ const InstructionFuncs = struct {
 
     fn op_I32_Const(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
         try preamble("I32_Const", pc, code, stack);
-        try stack.checkExhausted(1);
         const v: i32 = code[pc].immediate.ValueI32;
         stack.pushI32(v);
         try @call(.always_tail, InstructionFuncs.lookup(code[pc + 1].opcode), .{ pc + 1, code, stack });
@@ -1004,7 +991,6 @@ const InstructionFuncs = struct {
 
     fn op_I64_Const(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
         try preamble("I64_Const", pc, code, stack);
-        try stack.checkExhausted(1);
         const v: i64 = code[pc].immediate.ValueI64;
         stack.pushI64(v);
         try @call(.always_tail, InstructionFuncs.lookup(code[pc + 1].opcode), .{ pc + 1, code, stack });
@@ -1012,7 +998,6 @@ const InstructionFuncs = struct {
 
     fn op_F32_Const(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
         try preamble("F32_Const", pc, code, stack);
-        try stack.checkExhausted(1);
         const v: f32 = code[pc].immediate.ValueF32;
         stack.pushF32(v);
         try @call(.always_tail, InstructionFuncs.lookup(code[pc + 1].opcode), .{ pc + 1, code, stack });
@@ -1020,7 +1005,7 @@ const InstructionFuncs = struct {
 
     fn op_F64_Const(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
         try preamble("F64_Const", pc, code, stack);
-        try OpHelpers.f64Const(stack, code[pc]);
+        OpHelpers.f64Const(stack, code[pc]);
         try @call(.always_tail, InstructionFuncs.lookup(code[pc + 1].opcode), .{ pc + 1, code, stack });
     }
 
@@ -2012,7 +1997,6 @@ const InstructionFuncs = struct {
 
     fn op_Ref_Null(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
         try preamble("Ref_Null", pc, code, stack);
-        try stack.checkExhausted(1);
         const valtype = code[pc].immediate.ValType;
         const val = try Val.nullRef(valtype);
         stack.pushValue(val);
@@ -2029,7 +2013,6 @@ const InstructionFuncs = struct {
 
     fn op_Ref_Func(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
         try preamble("Ref_Func", pc, code, stack);
-        try stack.checkExhausted(1);
         const func_index: u32 = code[pc].immediate.Index;
         const val = Val{ .FuncRef = .{ .index = func_index, .module_instance = stack.topFrame().module_instance } };
         stack.pushValue(val);
@@ -2793,7 +2776,6 @@ const InstructionFuncs = struct {
 
     fn op_V128_Const(pc: u32, code: [*]const Instruction, stack: *Stack) anyerror!void {
         try preamble("V128_Const", pc, code, stack);
-        try stack.checkExhausted(1);
         const v: v128 = code[pc].immediate.ValueVec;
         stack.pushV128(v);
         try @call(.always_tail, InstructionFuncs.lookup(code[pc + 1].opcode), .{ pc + 1, code, stack });
@@ -3950,13 +3932,22 @@ pub const StackVM = struct {
             const func_type: *const FunctionTypeDefinition = &module.module_def.types.items[def_func.type_index];
             const param_types: []const ValType = func_type.getParams();
 
+            const num_locals: u32 = @intCast(def_func.locals.items.len);
+            const num_params: u16 = @intCast(param_types.len);
+            const num_values: u32 = @intCast(def_func.stack_stats.values);
+
             const f = FunctionInstance{
                 .type_def_index = def_func.type_index,
                 .def_index = @as(u32, @intCast(i)),
+                .code = module.module_def.code.instructions.items.ptr,
                 .instructions_begin = def_func.instructions_begin,
-                .num_locals = @intCast(def_func.locals.items.len),
-                .num_params = @intCast(param_types.len),
+                .num_locals = num_locals,
+                .num_params = num_params,
                 .num_returns = @intCast(func_type.getReturns().len),
+
+                // maximum number of values that can be on the stack for this function
+                .max_values = num_values + num_locals + num_params,
+                .max_labels = @intCast(def_func.stack_stats.labels),
             };
             try self.functions.append(f);
         }
@@ -4152,11 +4143,11 @@ pub const StackVM = struct {
         }
 
         try self.stack.pushFrame(&func, module);
-        try self.stack.pushLabel(func.num_returns, @intCast(func_def.continuation));
+        self.stack.pushLabel(func.num_returns, @intCast(func_def.continuation));
 
         DebugTrace.traceFunction(module, self.stack.num_frames, func.def_index);
 
-        try InstructionFuncs.run(@intCast(func.instructions_begin), module.module_def.code.instructions.items.ptr, &self.stack);
+        try InstructionFuncs.run(@intCast(func.instructions_begin), func.code, &self.stack);
 
         if (returns_slice.len > 0) {
             var index: i32 = @as(i32, @intCast(returns_slice.len - 1));
