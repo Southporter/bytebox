@@ -628,40 +628,40 @@ pub const OpHelpers = struct {
     }
 
     pub fn memSize(stack: *Stack) !void {
-                try stack.checkExhausted(1);
-                const memory_index: usize = 0;
-                var memory_instance: *const MemoryInstance = stack.topFrame().module_instance.store.getMemory(memory_index);
+        try stack.checkExhausted(1);
+        const memory_index: usize = 0;
+        var memory_instance: *const MemoryInstance = stack.topFrame().module_instance.store.getMemory(memory_index);
 
-                switch (memory_instance.limits.indexType()) {
-                    .I32 => stack.pushI32(@intCast(memory_instance.size())),
-                    .I64 => stack.pushI64(@intCast(memory_instance.size())),
-                    else => unreachable,
-                }
+        switch (memory_instance.limits.indexType()) {
+            .I32 => stack.pushI32(@intCast(memory_instance.size())),
+            .I64 => stack.pushI64(@intCast(memory_instance.size())),
+            else => unreachable,
+        }
     }
     pub fn memGrow(stack: *Stack) void {
-                const memory_index: usize = 0;
-                var memory_instance: *MemoryInstance = stack.topFrame().module_instance.store.getMemory(memory_index);
+        const memory_index: usize = 0;
+        var memory_instance: *MemoryInstance = stack.topFrame().module_instance.store.getMemory(memory_index);
 
-                const old_num_pages: i32 = @as(i32, @intCast(memory_instance.limits.min));
-                const num_pages: i64 = switch (memory_instance.limits.indexType()) {
-                    .I32 => stack.popI32(),
-                    .I64 => stack.popI64(),
-                    else => unreachable,
-                };
+        const old_num_pages: i32 = @as(i32, @intCast(memory_instance.limits.min));
+        const num_pages: i64 = switch (memory_instance.limits.indexType()) {
+            .I32 => stack.popI32(),
+            .I64 => stack.popI64(),
+            else => unreachable,
+        };
 
-                if (num_pages >= 0 and memory_instance.grow(@as(usize, @intCast(num_pages)))) {
-                    switch (memory_instance.limits.indexType()) {
-                        .I32 => stack.pushI32(old_num_pages),
-                        .I64 => stack.pushI64(old_num_pages),
-                        else => unreachable,
-                    }
-                } else {
-                    switch (memory_instance.limits.indexType()) {
-                        .I32 => stack.pushI32(-1),
-                        .I64 => stack.pushI64(-1),
-                        else => unreachable,
-                    }
-                }
+        if (num_pages >= 0 and memory_instance.grow(@as(usize, @intCast(num_pages)))) {
+            switch (memory_instance.limits.indexType()) {
+                .I32 => stack.pushI32(old_num_pages),
+                .I64 => stack.pushI64(old_num_pages),
+                else => unreachable,
+            }
+        } else {
+            switch (memory_instance.limits.indexType()) {
+                .I32 => stack.pushI32(-1),
+                .I64 => stack.pushI64(-1),
+                else => unreachable,
+            }
+        }
     }
 
     pub fn call(comptime Vm: type, stack: *Stack, pc: u32, code: [*]const Instruction) anyerror!FuncCallData {
@@ -735,7 +735,7 @@ pub const OpHelpers = struct {
         }
     }
 
-    pub fn callIndirect(comptime Vm: type, stack: *Stack, pc: u32, code: [*]const Instruction) anyerror!void {
+    pub fn callIndirect(comptime Vm: type, stack: *Stack, pc: u32, code: [*]const Instruction) anyerror!FuncCallData {
         const current_module: *ModuleInstance = stack.topFrame().module_instance;
         const immediates: *const CallIndirectImmediates = &code[pc].immediate.CallIndirect;
         const table_index: u32 = immediates.table_index;
@@ -778,7 +778,7 @@ pub const OpHelpers = struct {
             if (func_import.isTypeSignatureEql(func_type_def) == false) {
                 return error.TrapIndirectCallTypeMismatch;
             }
-            return try OpHelpers.callImport(pc, stack, func_import);
+            return try OpHelpers.callImport(Vm, pc, stack, func_import);
         }
     }
 
@@ -962,23 +962,420 @@ pub const OpHelpers = struct {
     }
 
     pub fn i32Const(stack: *Stack, instruction: Instruction) !void {
-
-                try stack.checkExhausted(1);
-                const v: i32 = instruction.immediate.ValueI32;
-                stack.pushI32(v);
+        try stack.checkExhausted(1);
+        const v: i32 = instruction.immediate.ValueI32;
+        stack.pushI32(v);
     }
 
     pub fn i64Const(stack: *Stack, instruction: Instruction) !void {
-
-                try stack.checkExhausted(1);
-                const v: i64 = instruction.immediate.ValueI64;
-                stack.pushI64(v);
+        try stack.checkExhausted(1);
+        const v: i64 = instruction.immediate.ValueI64;
+        stack.pushI64(v);
     }
 
     pub fn f32Const(stack: *Stack, instruction: Instruction) !void {
-                try stack.checkExhausted(1);
-                const v: f32 = instruction.immediate.ValueF32;
-                stack.pushF32(v);
+        try stack.checkExhausted(1);
+        const v: f32 = instruction.immediate.ValueF32;
+        stack.pushF32(v);
+    }
+
+    pub fn f64Const(stack: *Stack, instruction: Instruction) !void {
+        try stack.checkExhausted(1);
+        const v: f64 = instruction.immediate.ValueF64;
+        stack.pushF64(v);
+    }
+
+    pub fn i32Eqz(stack: *Stack) void {
+        const v1: i32 = stack.popI32();
+        const result: i32 = if (v1 == 0) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i32Eq(stack: *Stack) void {
+        const v2: i32 = stack.popI32();
+        const v1: i32 = stack.popI32();
+        const result: i32 = if (v1 == v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i32Ne(stack: *Stack) void {
+        const v2: i32 = stack.popI32();
+        const v1: i32 = stack.popI32();
+        const result: i32 = if (v1 != v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i32LtS(stack: *Stack) void {
+        const v2: i32 = stack.popI32();
+        const v1: i32 = stack.popI32();
+        const result: i32 = if (v1 < v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i32LtU(stack: *Stack) void {
+        const v2: u32 = @as(u32, @bitCast(stack.popI32()));
+        const v1: u32 = @as(u32, @bitCast(stack.popI32()));
+        const result: i32 = if (v1 < v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i32GtS(stack: *Stack) void {
+        const v2: i32 = stack.popI32();
+        const v1: i32 = stack.popI32();
+        const result: i32 = if (v1 > v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i32GtU(stack: *Stack) void {
+        const v2: u32 = @as(u32, @bitCast(stack.popI32()));
+        const v1: u32 = @as(u32, @bitCast(stack.popI32()));
+        const result: i32 = if (v1 > v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i32LeS(stack: *Stack) void {
+        const v2: i32 = stack.popI32();
+        const v1: i32 = stack.popI32();
+        const result: i32 = if (v1 <= v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i32LeU(stack: *Stack) void {
+        const v2: u32 = @as(u32, @bitCast(stack.popI32()));
+        const v1: u32 = @as(u32, @bitCast(stack.popI32()));
+        const result: i32 = if (v1 <= v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i32GeS(stack: *Stack) void {
+        const v2: i32 = stack.popI32();
+        const v1: i32 = stack.popI32();
+        const result: i32 = if (v1 >= v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i32GeU(stack: *Stack) void {
+        const v2: u32 = @as(u32, @bitCast(stack.popI32()));
+        const v1: u32 = @as(u32, @bitCast(stack.popI32()));
+        const result: i32 = if (v1 >= v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i64Eqz(stack: *Stack) void {
+        const v1: i64 = stack.popI64();
+        const result: i32 = if (v1 == 0) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i64Eq(stack: *Stack) void {
+        const v2: i64 = stack.popI64();
+        const v1: i64 = stack.popI64();
+        const result: i32 = if (v1 == v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i64Ne(stack: *Stack) void {
+        const v2: i64 = stack.popI64();
+        const v1: i64 = stack.popI64();
+        const result: i32 = if (v1 != v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i64LtS(stack: *Stack) void {
+        const v2: i64 = stack.popI64();
+        const v1: i64 = stack.popI64();
+        const result: i32 = if (v1 < v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i64LtU(stack: *Stack) void {
+        const v2: u64 = @as(u64, @bitCast(stack.popI64()));
+        const v1: u64 = @as(u64, @bitCast(stack.popI64()));
+        const result: i32 = if (v1 < v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i64GtS(stack: *Stack) void {
+        const v2: i64 = stack.popI64();
+        const v1: i64 = stack.popI64();
+        const result: i32 = if (v1 > v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i64GtU(stack: *Stack) void {
+        const v2: u64 = @as(u64, @bitCast(stack.popI64()));
+        const v1: u64 = @as(u64, @bitCast(stack.popI64()));
+        const result: i32 = if (v1 > v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i64LeS(stack: *Stack) void {
+        const v2: i64 = stack.popI64();
+        const v1: i64 = stack.popI64();
+        const result: i32 = if (v1 <= v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i64LeU(stack: *Stack) void {
+        const v2: u64 = @as(u64, @bitCast(stack.popI64()));
+        const v1: u64 = @as(u64, @bitCast(stack.popI64()));
+        const result: i32 = if (v1 <= v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i64GeS(stack: *Stack) void {
+        const v2: i64 = stack.popI64();
+        const v1: i64 = stack.popI64();
+        const result: i32 = if (v1 >= v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn i64GeU(stack: *Stack) void {
+        const v2: u64 = @as(u64, @bitCast(stack.popI64()));
+        const v1: u64 = @as(u64, @bitCast(stack.popI64()));
+        const result: i32 = if (v1 >= v2) 1 else 0;
+        stack.pushI32(result);
+    }
+
+    pub fn f32Eq(stack: *Stack) void {
+        const v2 = stack.popF32();
+        const v1 = stack.popF32();
+        const value: i32 = if (v1 == v2) 1 else 0;
+        stack.pushI32(value);
+    }
+
+    pub fn f32Ne(stack: *Stack) void {
+        const v2 = stack.popF32();
+        const v1 = stack.popF32();
+        const value: i32 = if (v1 != v2) 1 else 0;
+        stack.pushI32(value);
+    }
+
+    pub fn f32Lt(stack: *Stack) void {
+        const v2 = stack.popF32();
+        const v1 = stack.popF32();
+        const value: i32 = if (v1 < v2) 1 else 0;
+        stack.pushI32(value);
+    }
+
+    pub fn f32Gt(stack: *Stack) void {
+        const v2 = stack.popF32();
+        const v1 = stack.popF32();
+        const value: i32 = if (v1 > v2) 1 else 0;
+        stack.pushI32(value);
+    }
+
+    pub fn f32Le(stack: *Stack) void {
+        const v2 = stack.popF32();
+        const v1 = stack.popF32();
+        const value: i32 = if (v1 <= v2) 1 else 0;
+        stack.pushI32(value);
+    }
+
+    pub fn f32Ge(stack: *Stack) void {
+        const v2 = stack.popF32();
+        const v1 = stack.popF32();
+        const value: i32 = if (v1 >= v2) 1 else 0;
+        stack.pushI32(value);
+    }
+
+    pub fn f64Eq(stack: *Stack) void {
+        const v2 = stack.popF64();
+        const v1 = stack.popF64();
+        const value: i32 = if (v1 == v2) 1 else 0;
+        stack.pushI32(value);
+    }
+
+    pub fn f64Ne(stack: *Stack) void {
+        const v2 = stack.popF64();
+        const v1 = stack.popF64();
+        const value: i32 = if (v1 != v2) 1 else 0;
+        stack.pushI32(value);
+    }
+
+    pub fn f64Lt(stack: *Stack) void {
+        const v2 = stack.popF64();
+        const v1 = stack.popF64();
+        const value: i32 = if (v1 < v2) 1 else 0;
+        stack.pushI32(value);
+    }
+
+    pub fn f64Gt(stack: *Stack) void {
+        const v2 = stack.popF64();
+        const v1 = stack.popF64();
+        const value: i32 = if (v1 > v2) 1 else 0;
+        stack.pushI32(value);
+    }
+
+    pub fn f64Le(stack: *Stack) void {
+        const v2 = stack.popF64();
+        const v1 = stack.popF64();
+        const value: i32 = if (v1 <= v2) 1 else 0;
+        stack.pushI32(value);
+    }
+
+    pub fn f64Ge(stack: *Stack) void {
+        const v2 = stack.popF64();
+        const v1 = stack.popF64();
+        const value: i32 = if (v1 >= v2) 1 else 0;
+        stack.pushI32(value);
+    }
+
+    pub fn i32Clz(stack: *Stack) void {
+        const v: i32 = stack.popI32();
+        const num_zeroes = @clz(v);
+        stack.pushI32(num_zeroes);
+    }
+
+    pub fn i32Ctz(stack: *Stack) void {
+        const v: i32 = stack.popI32();
+        const num_zeroes = @ctz(v);
+        stack.pushI32(num_zeroes);
+    }
+
+    pub fn i32Popcnt(stack: *Stack) void {
+        const v: i32 = stack.popI32();
+        const num_bits_set = @popCount(v);
+        stack.pushI32(num_bits_set);
+    }
+
+    pub fn i32Add(stack: *Stack) void {
+        const v2: i32 = stack.popI32();
+        const v1: i32 = stack.popI32();
+        const result = v1 +% v2;
+        stack.pushI32(result);
+    }
+
+    pub fn i32Sub(stack: *Stack) void {
+        const v2: i32 = stack.popI32();
+        const v1: i32 = stack.popI32();
+        const result = v1 -% v2;
+        stack.pushI32(result);
+    }
+
+    pub fn i32Mul(stack: *Stack) void {
+        const v2: i32 = stack.popI32();
+        const v1: i32 = stack.popI32();
+        const value = v1 *% v2;
+        stack.pushI32(value);
+    }
+
+    pub fn i32DivS(stack: *Stack) !void {
+        const v2: i32 = stack.popI32();
+        const v1: i32 = stack.popI32();
+        const value = std.math.divTrunc(i32, v1, v2) catch |e| {
+            if (e == error.DivisionByZero) {
+                return error.TrapIntegerDivisionByZero;
+            } else if (e == error.Overflow) {
+                return error.TrapIntegerOverflow;
+            } else {
+                return e;
+            }
+        };
+        stack.pushI32(value);
+    }
+
+    pub fn i32DivU(stack: *Stack) !void {
+        const v2: u32 = @as(u32, @bitCast(stack.popI32()));
+        const v1: u32 = @as(u32, @bitCast(stack.popI32()));
+        const value_unsigned = std.math.divFloor(u32, v1, v2) catch |e| {
+            if (e == error.DivisionByZero) {
+                return error.TrapIntegerDivisionByZero;
+            } else if (e == error.Overflow) {
+                return error.TrapIntegerOverflow;
+            } else {
+                return e;
+            }
+        };
+        const value = @as(i32, @bitCast(value_unsigned));
+        stack.pushI32(value);
+    }
+
+    pub fn i32RemS(stack: *Stack) !void {
+        const v2: i32 = stack.popI32();
+        const v1: i32 = stack.popI32();
+        const denom: i32 = @intCast(@abs(v2));
+        const value = std.math.rem(i32, v1, denom) catch |e| {
+            if (e == error.DivisionByZero) {
+                return error.TrapIntegerDivisionByZero;
+            } else {
+                return e;
+            }
+        };
+        stack.pushI32(value);
+    }
+
+    pub fn i32RemU(stack: *Stack) !void {
+        const v2: u32 = @as(u32, @bitCast(stack.popI32()));
+        const v1: u32 = @as(u32, @bitCast(stack.popI32()));
+        const value_unsigned = std.math.rem(u32, v1, v2) catch |e| {
+            if (e == error.DivisionByZero) {
+                return error.TrapIntegerDivisionByZero;
+            } else {
+                return e;
+            }
+        };
+        const value = @as(i32, @bitCast(value_unsigned));
+        stack.pushI32(value);
+    }
+
+    pub fn i32And(stack: *Stack) void {
+        const v2: u32 = @as(u32, @bitCast(stack.popI32()));
+        const v1: u32 = @as(u32, @bitCast(stack.popI32()));
+        const value = @as(i32, @bitCast(v1 & v2));
+        stack.pushI32(value);
+    }
+
+    pub fn i32Or(stack: *Stack) void {
+        const v2: u32 = @as(u32, @bitCast(stack.popI32()));
+        const v1: u32 = @as(u32, @bitCast(stack.popI32()));
+        const value = @as(i32, @bitCast(v1 | v2));
+        stack.pushI32(value);
+    }
+
+    pub fn i32Xor(stack: *Stack) void {
+        const v2: u32 = @as(u32, @bitCast(stack.popI32()));
+        const v1: u32 = @as(u32, @bitCast(stack.popI32()));
+        const value = @as(i32, @bitCast(v1 ^ v2));
+        stack.pushI32(value);
+    }
+
+    pub fn i32Shl(stack: *Stack) !void {
+        const shift_unsafe: i32 = stack.popI32();
+        const int: i32 = stack.popI32();
+        const shift: i32 = try std.math.mod(i32, shift_unsafe, 32);
+        const value = std.math.shl(i32, int, shift);
+        stack.pushI32(value);
+    }
+
+    pub fn i32ShrS(stack: *Stack) !void {
+        const shift_unsafe: i32 = stack.popI32();
+        const int: i32 = stack.popI32();
+        const shift = try std.math.mod(i32, shift_unsafe, 32);
+        const value = std.math.shr(i32, int, shift);
+        stack.pushI32(value);
+    }
+
+    pub fn i32ShrU(stack: *Stack) !void {
+        const shift_unsafe: u32 = @as(u32, @bitCast(stack.popI32()));
+        const int: u32 = @as(u32, @bitCast(stack.popI32()));
+        const shift = try std.math.mod(u32, shift_unsafe, 32);
+        const value = @as(i32, @bitCast(std.math.shr(u32, int, shift)));
+        stack.pushI32(value);
+    }
+
+    pub fn i32Rotl(stack: *Stack) void {
+        const rot: u32 = @as(u32, @bitCast(stack.popI32()));
+        const int: u32 = @as(u32, @bitCast(stack.popI32()));
+        const value = @as(i32, @bitCast(std.math.rotl(u32, int, rot)));
+        stack.pushI32(value);
+    }
+
+    pub fn i32Rotr(stack: *Stack) void {
+        const rot: u32 = @as(u32, @bitCast(stack.popI32()));
+        const int: u32 = @as(u32, @bitCast(stack.popI32()));
+        const value = @as(i32, @bitCast(std.math.rotr(u32, int, rot)));
+        stack.pushI32(value);
     }
 
     const VectorBinaryOp = enum(u8) {

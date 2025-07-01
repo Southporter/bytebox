@@ -49,7 +49,7 @@ const DebugTrapInstructionMode = inst.DebugTrapInstructionMode;
 
 const metering = @import("metering.zig");
 
-const shared = @import("stack_shared.zig");
+const shared = @import("stack.zig");
 const FunctionInstance = shared.FunctionInstance;
 const CallFrame = shared.CallFrame;
 const FuncCallData = shared.FuncCallData;
@@ -753,9 +753,9 @@ pub const StackVM = struct {
 
             Opcode.Memory_Grow => {
                 try preamble("Memory_Grow", pc, code, stack);
-                OpHelpers.memGrow(stack, pc);
-                    pc += 1;
-                    continue :interpret code[pc].opcode;
+                OpHelpers.memGrow(stack);
+                pc += 1;
+                continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Const => {
@@ -781,558 +781,371 @@ pub const StackVM = struct {
 
             Opcode.F64_Const => {
                 try preamble("F64_Const", pc, code, stack);
-                try stack.checkExhausted(1);
-                const v: f64 = code[pc].immediate.ValueF64;
-                stack.pushF64(v);
+                try OpHelpers.f64Const(stack, code[pc]);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Eqz => {
                 try preamble("I32_Eqz", pc, code, stack);
-                const v1: i32 = stack.popI32();
-                const result: i32 = if (v1 == 0) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i32Eqz(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Eq => {
                 try preamble("I32_Eq", pc, code, stack);
-                const v2: i32 = stack.popI32();
-                const v1: i32 = stack.popI32();
-                const result: i32 = if (v1 == v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i32Eq(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_NE => {
                 try preamble("I32_NE", pc, code, stack);
-                const v2: i32 = stack.popI32();
-                const v1: i32 = stack.popI32();
-                const result: i32 = if (v1 != v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i32Ne(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_LT_S => {
                 try preamble("I32_LT_S", pc, code, stack);
-                const v2: i32 = stack.popI32();
-                const v1: i32 = stack.popI32();
-                const result: i32 = if (v1 < v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i32LtS(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_LT_U => {
                 try preamble("I32_LT_U", pc, code, stack);
-                const v2: u32 = @as(u32, @bitCast(stack.popI32()));
-                const v1: u32 = @as(u32, @bitCast(stack.popI32()));
-                const result: i32 = if (v1 < v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i32LtU(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_GT_S => {
                 try preamble("I32_GT_S", pc, code, stack);
-                const v2: i32 = stack.popI32();
-                const v1: i32 = stack.popI32();
-                const result: i32 = if (v1 > v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i32GtS(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_GT_U => {
                 try preamble("I32_GT_U", pc, code, stack);
-                const v2: u32 = @as(u32, @bitCast(stack.popI32()));
-                const v1: u32 = @as(u32, @bitCast(stack.popI32()));
-                const result: i32 = if (v1 > v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i32GtU(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_LE_S => {
                 try preamble("I32_LE_S", pc, code, stack);
-                const v2: i32 = stack.popI32();
-                const v1: i32 = stack.popI32();
-                const result: i32 = if (v1 <= v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i32LeS(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_LE_U => {
                 try preamble("I32_LE_U", pc, code, stack);
-                const v2: u32 = @as(u32, @bitCast(stack.popI32()));
-                const v1: u32 = @as(u32, @bitCast(stack.popI32()));
-                const result: i32 = if (v1 <= v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i32LeU(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_GE_S => {
                 try preamble("I32_GE_S", pc, code, stack);
-                const v2: i32 = stack.popI32();
-                const v1: i32 = stack.popI32();
-                const result: i32 = if (v1 >= v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i32GeS(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_GE_U => {
                 try preamble("I32_GE_U", pc, code, stack);
-                const v2: u32 = @as(u32, @bitCast(stack.popI32()));
-                const v1: u32 = @as(u32, @bitCast(stack.popI32()));
-                const result: i32 = if (v1 >= v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i32GeU(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I64_Eqz => {
                 try preamble("I64_Eqz", pc, code, stack);
-                const v1: i64 = stack.popI64();
-                const result: i32 = if (v1 == 0) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i64Eqz(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I64_Eq => {
                 try preamble("I64_Eq", pc, code, stack);
-                const v2: i64 = stack.popI64();
-                const v1: i64 = stack.popI64();
-                const result: i32 = if (v1 == v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i64Eq(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I64_NE => {
                 try preamble("I64_NE", pc, code, stack);
-                const v2: i64 = stack.popI64();
-                const v1: i64 = stack.popI64();
-                const result: i32 = if (v1 != v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i64Ne(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I64_LT_S => {
                 try preamble("I64_LT_S", pc, code, stack);
-                const v2: i64 = stack.popI64();
-                const v1: i64 = stack.popI64();
-                const result: i32 = if (v1 < v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i64LtS(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I64_LT_U => {
                 try preamble("I64_LT_U", pc, code, stack);
-                const v2: u64 = @as(u64, @bitCast(stack.popI64()));
-                const v1: u64 = @as(u64, @bitCast(stack.popI64()));
-                const result: i32 = if (v1 < v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i64LtU(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I64_GT_S => {
                 try preamble("I64_GT_S", pc, code, stack);
-                const v2: i64 = stack.popI64();
-                const v1: i64 = stack.popI64();
-                const result: i32 = if (v1 > v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i64GtS(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I64_GT_U => {
                 try preamble("I64_GT_U", pc, code, stack);
-                const v2: u64 = @as(u64, @bitCast(stack.popI64()));
-                const v1: u64 = @as(u64, @bitCast(stack.popI64()));
-                const result: i32 = if (v1 > v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i64GtU(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I64_LE_S => {
                 try preamble("I64_LE_S", pc, code, stack);
-                const v2: i64 = stack.popI64();
-                const v1: i64 = stack.popI64();
-                const result: i32 = if (v1 <= v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i64LeS(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I64_LE_U => {
                 try preamble("I64_LE_U", pc, code, stack);
-                const v2: u64 = @as(u64, @bitCast(stack.popI64()));
-                const v1: u64 = @as(u64, @bitCast(stack.popI64()));
-                const result: i32 = if (v1 <= v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i64LeU(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I64_GE_S => {
                 try preamble("I64_GE_S", pc, code, stack);
-                const v2: i64 = stack.popI64();
-                const v1: i64 = stack.popI64();
-                const result: i32 = if (v1 >= v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i64GeS(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I64_GE_U => {
                 try preamble("I64_GE_U", pc, code, stack);
-                const v2: u64 = @as(u64, @bitCast(stack.popI64()));
-                const v1: u64 = @as(u64, @bitCast(stack.popI64()));
-                const result: i32 = if (v1 >= v2) 1 else 0;
-                stack.pushI32(result);
+                OpHelpers.i64GeU(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F32_EQ => {
                 try preamble("F32_EQ", pc, code, stack);
-                const v2 = stack.popF32();
-                const v1 = stack.popF32();
-                const value: i32 = if (v1 == v2) 1 else 0;
-                stack.pushI32(value);
+                OpHelpers.f32Eq(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F32_NE => {
                 try preamble("F32_NE", pc, code, stack);
-                const v2 = stack.popF32();
-                const v1 = stack.popF32();
-                const value: i32 = if (v1 != v2) 1 else 0;
-                stack.pushI32(value);
+                OpHelpers.f32Ne(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F32_LT => {
                 try preamble("F32_LT", pc, code, stack);
-                const v2 = stack.popF32();
-                const v1 = stack.popF32();
-                const value: i32 = if (v1 < v2) 1 else 0;
-                stack.pushI32(value);
+                OpHelpers.f32Lt(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F32_GT => {
                 try preamble("F32_GT", pc, code, stack);
-                const v2 = stack.popF32();
-                const v1 = stack.popF32();
-                const value: i32 = if (v1 > v2) 1 else 0;
-                stack.pushI32(value);
+                OpHelpers.f32Gt(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F32_LE => {
                 try preamble("F32_LE", pc, code, stack);
-                const v2 = stack.popF32();
-                const v1 = stack.popF32();
-                const value: i32 = if (v1 <= v2) 1 else 0;
-                stack.pushI32(value);
+                OpHelpers.f32Le(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F32_GE => {
                 try preamble("F32_GE", pc, code, stack);
-                const v2 = stack.popF32();
-                const v1 = stack.popF32();
-                const value: i32 = if (v1 >= v2) 1 else 0;
-                stack.pushI32(value);
+                OpHelpers.f32Ge(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F64_EQ => {
                 try preamble("F64_EQ", pc, code, stack);
-                const v2 = stack.popF64();
-                const v1 = stack.popF64();
-                const value: i32 = if (v1 == v2) 1 else 0;
-                stack.pushI32(value);
+                OpHelpers.f64Eq(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F64_NE => {
                 try preamble("F64_NE", pc, code, stack);
-                const v2 = stack.popF64();
-                const v1 = stack.popF64();
-                const value: i32 = if (v1 != v2) 1 else 0;
-                stack.pushI32(value);
+                OpHelpers.f64Ne(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F64_LT => {
                 try preamble("F64_LT", pc, code, stack);
-                const v2 = stack.popF64();
-                const v1 = stack.popF64();
-                const value: i32 = if (v1 < v2) 1 else 0;
-                stack.pushI32(value);
+                OpHelpers.f64Lt(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F64_GT => {
                 try preamble("F64_GT", pc, code, stack);
-                const v2 = stack.popF64();
-                const v1 = stack.popF64();
-                const value: i32 = if (v1 > v2) 1 else 0;
-                stack.pushI32(value);
+                OpHelpers.f64Gt(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F64_LE => {
                 try preamble("F64_LE", pc, code, stack);
-                const v2 = stack.popF64();
-                const v1 = stack.popF64();
-                const value: i32 = if (v1 <= v2) 1 else 0;
-                stack.pushI32(value);
+                OpHelpers.f64Le(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.F64_GE => {
                 try preamble("F64_GE", pc, code, stack);
-                const v2 = stack.popF64();
-                const v1 = stack.popF64();
-                const value: i32 = if (v1 >= v2) 1 else 0;
-                stack.pushI32(value);
+                OpHelpers.f64Ge(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Clz => {
                 try preamble("I32_Clz", pc, code, stack);
-                const v: i32 = stack.popI32();
-                const num_zeroes = @clz(v);
-                stack.pushI32(num_zeroes);
+                OpHelpers.i32Clz(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Ctz => {
                 try preamble("I32_Ctz", pc, code, stack);
-                const v: i32 = stack.popI32();
-                const num_zeroes = @ctz(v);
-                stack.pushI32(num_zeroes);
+                OpHelpers.i32Ctz(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Popcnt => {
                 try preamble("I32_Popcnt", pc, code, stack);
-                const v: i32 = stack.popI32();
-                const num_bits_set = @popCount(v);
-                stack.pushI32(num_bits_set);
+                OpHelpers.i32Popcnt(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Add => {
                 try preamble("I32_Add", pc, code, stack);
-                const v2: i32 = stack.popI32();
-                const v1: i32 = stack.popI32();
-                const result = v1 +% v2;
-                stack.pushI32(result);
+                OpHelpers.i32Add(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Sub => {
                 try preamble("I32_Sub", pc, code, stack);
-                const v2: i32 = stack.popI32();
-                const v1: i32 = stack.popI32();
-                const result = v1 -% v2;
-                stack.pushI32(result);
+                OpHelpers.i32Sub(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Mul => {
                 try preamble("I32_Mul", pc, code, stack);
-                const v2: i32 = stack.popI32();
-                const v1: i32 = stack.popI32();
-                const value = v1 *% v2;
-                stack.pushI32(value);
+                OpHelpers.i32Mul(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Div_S => {
                 try preamble("I32_Div_S", pc, code, stack);
-                const v2: i32 = stack.popI32();
-                const v1: i32 = stack.popI32();
-                const value = std.math.divTrunc(i32, v1, v2) catch |e| {
-                    if (e == error.DivisionByZero) {
-                        return error.TrapIntegerDivisionByZero;
-                    } else if (e == error.Overflow) {
-                        return error.TrapIntegerOverflow;
-                    } else {
-                        return e;
-                    }
-                };
-                stack.pushI32(value);
+                try OpHelpers.i32DivS(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Div_U => {
                 try preamble("I32_Div_U", pc, code, stack);
-                const v2: u32 = @as(u32, @bitCast(stack.popI32()));
-                const v1: u32 = @as(u32, @bitCast(stack.popI32()));
-                const value_unsigned = std.math.divFloor(u32, v1, v2) catch |e| {
-                    if (e == error.DivisionByZero) {
-                        return error.TrapIntegerDivisionByZero;
-                    } else if (e == error.Overflow) {
-                        return error.TrapIntegerOverflow;
-                    } else {
-                        return e;
-                    }
-                };
-                const value = @as(i32, @bitCast(value_unsigned));
-                stack.pushI32(value);
+                try OpHelpers.i32DivU(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Rem_S => {
                 try preamble("I32_Rem_S", pc, code, stack);
-                const v2: i32 = stack.popI32();
-                const v1: i32 = stack.popI32();
-                const denom: i32 = @intCast(@abs(v2));
-                const value = std.math.rem(i32, v1, denom) catch |e| {
-                    if (e == error.DivisionByZero) {
-                        return error.TrapIntegerDivisionByZero;
-                    } else {
-                        return e;
-                    }
-                };
-                stack.pushI32(value);
+                try OpHelpers.i32RemS(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Rem_U => {
                 try preamble("I32_Rem_U", pc, code, stack);
-                const v2: u32 = @as(u32, @bitCast(stack.popI32()));
-                const v1: u32 = @as(u32, @bitCast(stack.popI32()));
-                const value_unsigned = std.math.rem(u32, v1, v2) catch |e| {
-                    if (e == error.DivisionByZero) {
-                        return error.TrapIntegerDivisionByZero;
-                    } else {
-                        return e;
-                    }
-                };
-                const value = @as(i32, @bitCast(value_unsigned));
-                stack.pushI32(value);
+                try OpHelpers.i32RemU(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_And => {
                 try preamble("I32_And", pc, code, stack);
-                const v2: u32 = @as(u32, @bitCast(stack.popI32()));
-                const v1: u32 = @as(u32, @bitCast(stack.popI32()));
-                const value = @as(i32, @bitCast(v1 & v2));
-                stack.pushI32(value);
+                OpHelpers.i32And(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Or => {
                 try preamble("I32_Or", pc, code, stack);
-                const v2: u32 = @as(u32, @bitCast(stack.popI32()));
-                const v1: u32 = @as(u32, @bitCast(stack.popI32()));
-                const value = @as(i32, @bitCast(v1 | v2));
-                stack.pushI32(value);
+                OpHelpers.i32Or(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Xor => {
                 try preamble("I32_Xor", pc, code, stack);
-                const v2: u32 = @as(u32, @bitCast(stack.popI32()));
-                const v1: u32 = @as(u32, @bitCast(stack.popI32()));
-                const value = @as(i32, @bitCast(v1 ^ v2));
-                stack.pushI32(value);
+                OpHelpers.i32Xor(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Shl => {
                 try preamble("I32_Shl", pc, code, stack);
-                const shift_unsafe: i32 = stack.popI32();
-                const int: i32 = stack.popI32();
-                const shift: i32 = try std.math.mod(i32, shift_unsafe, 32);
-                const value = std.math.shl(i32, int, shift);
-                stack.pushI32(value);
+                try OpHelpers.i32Shl(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Shr_S => {
                 try preamble("I32_Shr_S", pc, code, stack);
-                const shift_unsafe: i32 = stack.popI32();
-                const int: i32 = stack.popI32();
-                const shift = try std.math.mod(i32, shift_unsafe, 32);
-                const value = std.math.shr(i32, int, shift);
-                stack.pushI32(value);
+                try OpHelpers.i32ShrS(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Shr_U => {
                 try preamble("I32_Shr_U", pc, code, stack);
-                const shift_unsafe: u32 = @as(u32, @bitCast(stack.popI32()));
-                const int: u32 = @as(u32, @bitCast(stack.popI32()));
-                const shift = try std.math.mod(u32, shift_unsafe, 32);
-                const value = @as(i32, @bitCast(std.math.shr(u32, int, shift)));
-                stack.pushI32(value);
+                try OpHelpers.i32ShrU(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Rotl => {
                 try preamble("I32_Rotl", pc, code, stack);
-                const rot: u32 = @as(u32, @bitCast(stack.popI32()));
-                const int: u32 = @as(u32, @bitCast(stack.popI32()));
-                const value = @as(i32, @bitCast(std.math.rotl(u32, int, rot)));
-                stack.pushI32(value);
+                OpHelpers.i32Rotl(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
 
             Opcode.I32_Rotr => {
                 try preamble("I32_Rotr", pc, code, stack);
-                const rot: u32 = @as(u32, @bitCast(stack.popI32()));
-                const int: u32 = @as(u32, @bitCast(stack.popI32()));
-                const value = @as(i32, @bitCast(std.math.rotr(u32, int, rot)));
-                stack.pushI32(value);
+                OpHelpers.i32Rotr(stack);
                 pc += 1;
                 continue :interpret code[pc].opcode;
             },
