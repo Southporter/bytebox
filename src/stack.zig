@@ -1232,6 +1232,157 @@ pub const OpHelpers = struct {
         stack.pushI32(value);
     }
 
+    pub fn f32Add(stack: *Stack) void {
+        const v2 = stack.popF32();
+        const v1 = stack.popF32();
+        const value = v1 + v2;
+        stack.pushF32(value);
+    }
+
+    pub fn f32Sub(stack: *Stack) void {
+        const v2 = stack.popF32();
+        const v1 = stack.popF32();
+        const value = v1 - v2;
+        stack.pushF32(value);
+    }
+
+    pub fn f32Mul(stack: *Stack) void {
+        const v2 = stack.popF32();
+        const v1 = stack.popF32();
+        const value = v1 * v2;
+        stack.pushF32(value);
+    }
+
+    pub fn f32Div(stack: *Stack) void {
+        const v2 = stack.popF32();
+        const v1 = stack.popF32();
+        const value = v1 / v2;
+        stack.pushF32(value);
+    }
+
+    pub fn f32Nearest(stack: *Stack) void {
+        const f = stack.popF32();
+        var value: f32 = undefined;
+        const ceil = @ceil(f);
+        const floor = @floor(f);
+        if (ceil - f == f - floor) {
+            value = if (@mod(ceil, 2) == 0) ceil else floor;
+        } else {
+            value = @round(f);
+        }
+        stack.pushF32(value);
+    }
+
+    pub fn f32Abs(stack: *Stack) void {
+        const f = stack.popF32();
+        const value = @abs(f);
+        stack.pushF32(value);
+    }
+
+    pub fn f32Min(stack: *Stack) void {
+        const v2 = stack.popF32();
+        const v1 = stack.popF32();
+        const value = propagateNanWithOp(.Min, v1, v2);
+        stack.pushF32(value);
+    }
+
+    pub fn f32Max(stack: *Stack) void {
+        const v2 = stack.popF32();
+        const v1 = stack.popF32();
+        const value = propagateNanWithOp(.Max, v1, v2);
+        stack.pushF32(value);
+    }
+
+    pub fn f64Add(stack: *Stack) void {
+        const v2 = stack.popF64();
+        const v1 = stack.popF64();
+        const value = v1 + v2;
+        stack.pushF64(value);
+    }
+
+    pub fn f64Sub(stack: *Stack) void {
+        const v2 = stack.popF64();
+        const v1 = stack.popF64();
+        const value = v1 - v2;
+        stack.pushF64(value);
+    }
+
+    pub fn f64Mul(stack: *Stack) void {
+        const v2 = stack.popF64();
+        const v1 = stack.popF64();
+        const value = v1 * v2;
+        stack.pushF64(value);
+    }
+
+    pub fn f64Div(stack: *Stack) void {
+        const v2 = stack.popF64();
+        const v1 = stack.popF64();
+        const value = v1 / v2;
+        stack.pushF64(value);
+    }
+
+    pub fn f64Abs(stack: *Stack) void {
+        const f = stack.popF64();
+        const value = @abs(f);
+        stack.pushF64(value);
+    }
+
+    pub fn f64Neg(stack: *Stack) void {
+        const f = stack.popF64();
+        stack.pushF64(-f);
+    }
+
+    pub fn f64Ceil(stack: *Stack) void {
+        const f = stack.popF64();
+        const value = @ceil(f);
+        stack.pushF64(value);
+    }
+
+    pub fn f64Floor(stack: *Stack) void {
+        const f = stack.popF64();
+        const value = @floor(f);
+        stack.pushF64(value);
+    }
+
+    pub fn f64Trunc(stack: *Stack) void {
+        const f = stack.popF64();
+        const value = @trunc(f);
+        stack.pushF64(value);
+    }
+
+    pub fn f64Nearest(stack: *Stack) void {
+        const f = stack.popF64();
+        var value: f64 = undefined;
+        const ceil = @ceil(f);
+        const floor = @floor(f);
+        if (ceil - f == f - floor) {
+            value = if (@mod(ceil, 2) == 0) ceil else floor;
+        } else {
+            value = @round(f);
+        }
+        stack.pushF64(value);
+    }
+
+    pub fn f64Sqrt(stack: *Stack) void {
+        const f = stack.popF64();
+        const value = std.math.sqrt(f);
+        stack.pushF64(value);
+    }
+
+    pub fn f64Min(stack: *Stack) void {
+        const v2 = stack.popF64();
+        const v1 = stack.popF64();
+        const value = propagateNanWithOp(.Min, v1, v2);
+        stack.pushF64(value);
+    }
+
+    pub fn f64Max(stack: *Stack) void {
+        const v2 = stack.popF64();
+        const v1 = stack.popF64();
+        const value = propagateNanWithOp(.Max, v1, v2);
+        stack.pushF64(value);
+    }
+
     pub fn i32Clz(stack: *Stack) void {
         const v: i32 = stack.popI32();
         const num_zeroes = @clz(v);
@@ -1387,6 +1538,163 @@ pub const OpHelpers = struct {
         const int: u32 = @as(u32, @bitCast(stack.popI32()));
         const value = @as(i32, @bitCast(std.math.rotr(u32, int, rot)));
         stack.pushI32(value);
+    }
+
+    pub fn i64Clz(stack: *Stack) void {
+        const v: i64 = stack.popI64();
+        const num_zeroes = @clz(v);
+        stack.pushI64(num_zeroes);
+    }
+
+    pub fn i64Ctz(stack: *Stack) void {
+        const v: i64 = stack.popI64();
+        const num_zeroes = @ctz(v);
+        stack.pushI64(num_zeroes);
+    }
+
+    pub fn i64Popcnt(stack: *Stack) void {
+        const v: i64 = stack.popI64();
+        const num_bits_set = @popCount(v);
+        stack.pushI64(num_bits_set);
+    }
+
+    pub fn i64Add(stack: *Stack) void {
+        const v2: i64 = stack.popI64();
+        const v1: i64 = stack.popI64();
+        const result = v1 +% v2;
+        stack.pushI64(result);
+    }
+
+    pub fn i64Sub(stack: *Stack) void {
+        const v2: i64 = stack.popI64();
+        const v1: i64 = stack.popI64();
+        const result = v1 -% v2;
+        stack.pushI64(result);
+    }
+
+    pub fn i64Mul(stack: *Stack) void {
+        const v2: i64 = stack.popI64();
+        const v1: i64 = stack.popI64();
+        const value = v1 *% v2;
+        stack.pushI64(value);
+    }
+
+    pub fn i64DivS(stack: *Stack) !void {
+        const v2: i64 = stack.popI64();
+        const v1: i64 = stack.popI64();
+        const value = std.math.divTrunc(i64, v1, v2) catch |e| {
+            if (e == error.DivisionByZero) {
+                return error.TrapIntegerDivisionByZero;
+            } else if (e == error.Overflow) {
+                return error.TrapIntegerOverflow;
+            } else {
+                return e;
+            }
+        };
+        stack.pushI64(value);
+    }
+
+    pub fn i64DivU(stack: *Stack) !void {
+        const v2: u64 = @as(u64, @bitCast(stack.popI64()));
+        const v1: u64 = @as(u64, @bitCast(stack.popI64()));
+        const value_unsigned = std.math.divFloor(u64, v1, v2) catch |e| {
+            if (e == error.DivisionByZero) {
+                return error.TrapIntegerDivisionByZero;
+            } else if (e == error.Overflow) {
+                return error.TrapIntegerOverflow;
+            } else {
+                return e;
+            }
+        };
+        const value = @as(i64, @bitCast(value_unsigned));
+        stack.pushI64(value);
+    }
+
+    pub fn i64RemS(stack: *Stack) !void {
+        const v2: i64 = stack.popI64();
+        const v1: i64 = stack.popI64();
+        const denom: i64 = @intCast(@abs(v2));
+        const value = std.math.rem(i64, v1, denom) catch |e| {
+            if (e == error.DivisionByZero) {
+                return error.TrapIntegerDivisionByZero;
+            } else {
+                return e;
+            }
+        };
+        stack.pushI64(value);
+    }
+
+    pub fn i64RemU(stack: *Stack) !void {
+        const v2: u64 = @as(u64, @bitCast(stack.popI64()));
+        const v1: u64 = @as(u64, @bitCast(stack.popI64()));
+        const value_unsigned = std.math.rem(u64, v1, v2) catch |e| {
+            if (e == error.DivisionByZero) {
+                return error.TrapIntegerDivisionByZero;
+            } else {
+                return e;
+            }
+        };
+        const value = @as(i64, @bitCast(value_unsigned));
+        stack.pushI64(value);
+    }
+
+    pub fn i64And(stack: *Stack) void {
+        const v2: u64 = @as(u64, @bitCast(stack.popI64()));
+        const v1: u64 = @as(u64, @bitCast(stack.popI64()));
+        const value = @as(i64, @bitCast(v1 & v2));
+        stack.pushI64(value);
+    }
+
+    pub fn i64Or(stack: *Stack) void {
+        const v2: u64 = @as(u64, @bitCast(stack.popI64()));
+        const v1: u64 = @as(u64, @bitCast(stack.popI64()));
+        const value = @as(i64, @bitCast(v1 | v2));
+        stack.pushI64(value);
+    }
+
+    pub fn i64Xor(stack: *Stack) void {
+        const v2: u64 = @as(u64, @bitCast(stack.popI64()));
+        const v1: u64 = @as(u64, @bitCast(stack.popI64()));
+        const value = @as(i64, @bitCast(v1 ^ v2));
+        stack.pushI64(value);
+    }
+
+    pub fn i64Shl(stack: *Stack) !void {
+        const shift_unsafe: i64 = stack.popI64();
+        const int: i64 = stack.popI64();
+        const shift: i64 = try std.math.mod(i64, shift_unsafe, 64);
+        const value = std.math.shl(i64, int, shift);
+        stack.pushI64(value);
+    }
+
+    pub fn i64ShrS(stack: *Stack) !void {
+        const shift_unsafe: i64 = stack.popI64();
+        const int: i64 = stack.popI64();
+        const shift = try std.math.mod(i64, shift_unsafe, 64);
+        const value = std.math.shr(i64, int, shift);
+        stack.pushI64(value);
+    }
+
+    pub fn i64ShrU(stack: *Stack) !void {
+        const shift_unsafe: u64 = @as(u64, @bitCast(stack.popI64()));
+        const int: u64 = @as(u64, @bitCast(stack.popI64()));
+        const shift = try std.math.mod(u64, shift_unsafe, 64);
+        const value = @as(i64, @bitCast(std.math.shr(u64, int, shift)));
+        stack.pushI64(value);
+    }
+
+    pub fn i64Rotl(stack: *Stack) void {
+        const rot: u64 = @as(u64, @bitCast(stack.popI64()));
+        const int: u64 = @as(u64, @bitCast(stack.popI64()));
+        const value = @as(i64, @bitCast(std.math.rotl(u64, int, rot)));
+        stack.pushI64(value);
+    }
+
+    pub fn i64Rotr(stack: *Stack) void {
+        const rot: u64 = @as(u64, @bitCast(stack.popI64()));
+        const int: u64 = @as(u64, @bitCast(stack.popI64()));
+        const value = @as(i64, @bitCast(std.math.rotr(u64, int, rot)));
+        stack.pushI64(value);
     }
 
     const VectorBinaryOp = enum(u8) {
@@ -1804,5 +2112,394 @@ pub const OpHelpers = struct {
 
         const mix = @shuffle(out_info.child, v1_narrow, v2_narrow, mask);
         stack.pushV128(@as(v128, @bitCast(mix)));
+    }
+
+    pub fn f64Copysign(stack: *Stack) void {
+        const v2 = stack.popF64();
+        const v1 = stack.popF64();
+        const value = std.math.copysign(v1, v2);
+        stack.pushF64(value);
+    }
+
+    pub fn f64ConvertI32S(stack: *Stack) void {
+        const v = stack.popI32();
+        stack.pushF64(@as(f64, @floatFromInt(v)));
+    }
+
+    pub fn f64ConvertI32U(stack: *Stack) void {
+        const v = @as(u32, @bitCast(stack.popI32()));
+        stack.pushF64(@as(f64, @floatFromInt(v)));
+    }
+
+    pub fn f64ConvertI64S(stack: *Stack) void {
+        const v = stack.popI64();
+        stack.pushF64(@as(f64, @floatFromInt(v)));
+    }
+
+    pub fn f64ConvertI64U(stack: *Stack) void {
+        const v = @as(u64, @bitCast(stack.popI64()));
+        stack.pushF64(@as(f64, @floatFromInt(v)));
+    }
+
+    pub fn f32DemoteF64(stack: *Stack) void {
+        const v = stack.popF64();
+        stack.pushF32(@as(f32, @floatCast(v)));
+    }
+
+    pub fn f64PromoteF32(stack: *Stack) void {
+        const v = stack.popF32();
+        stack.pushF64(@as(f64, @floatCast(v)));
+    }
+
+    pub fn f32Trunc(stack: *Stack) void {
+        const f = stack.popF32();
+        const value = std.math.trunc(f);
+        stack.pushF32(value);
+    }
+
+    pub fn i32WrapI64(stack: *Stack) void {
+        const v = stack.popI64();
+        const mod = @as(i32, @truncate(v));
+        stack.pushI32(mod);
+    }
+
+    pub fn i64ExtendI32S(stack: *Stack) void {
+        const v32 = stack.popI32();
+        const v64: i64 = v32;
+        stack.pushI64(v64);
+    }
+
+    pub fn i64ExtendI32U(stack: *Stack) void {
+        const v32 = stack.popI32();
+        const v64: u64 = @as(u32, @bitCast(v32));
+        stack.pushI64(@as(i64, @bitCast(v64)));
+    }
+
+    pub fn i32Extend8S(stack: *Stack) void {
+        const v = stack.popI32();
+        const v_truncated = @as(i8, @truncate(v));
+        const v_extended: i32 = v_truncated;
+        stack.pushI32(v_extended);
+    }
+
+    pub fn i32Extend16S(stack: *Stack) void {
+        const v = stack.popI32();
+        const v_truncated = @as(i16, @truncate(v));
+        const v_extended: i32 = v_truncated;
+        stack.pushI32(v_extended);
+    }
+
+    pub fn i64Extend8S(stack: *Stack) void {
+        const v = stack.popI64();
+        const v_truncated = @as(i8, @truncate(v));
+        const v_extended: i64 = v_truncated;
+        stack.pushI64(v_extended);
+    }
+
+    pub fn i64Extend16S(stack: *Stack) void {
+        const v = stack.popI64();
+        const v_truncated = @as(i16, @truncate(v));
+        const v_extended: i64 = v_truncated;
+        stack.pushI64(v_extended);
+    }
+
+    pub fn i64Extend32S(stack: *Stack) void {
+        const v = stack.popI64();
+        const v_truncated = @as(i32, @truncate(v));
+        const v_extended: i64 = v_truncated;
+        stack.pushI64(v_extended);
+    }
+
+    pub fn f32ConvertI32S(stack: *Stack) void {
+        const v = stack.popI32();
+        stack.pushF32(@as(f32, @floatFromInt(v)));
+    }
+
+    pub fn f32ConvertI32U(stack: *Stack) void {
+        const v = @as(u32, @bitCast(stack.popI32()));
+        stack.pushF32(@as(f32, @floatFromInt(v)));
+    }
+
+    pub fn f32ConvertI64S(stack: *Stack) void {
+        const v = stack.popI64();
+        stack.pushF32(@as(f32, @floatFromInt(v)));
+    }
+
+    pub fn f32ConvertI64U(stack: *Stack) void {
+        const v = @as(u64, @bitCast(stack.popI64()));
+        stack.pushF32(@as(f32, @floatFromInt(v)));
+    }
+
+    pub fn i32ReinterpretF32(stack: *Stack) void {
+        const v = stack.popF32();
+        stack.pushI32(@as(i32, @bitCast(v)));
+    }
+
+    pub fn i64ReinterpretF64(stack: *Stack) void {
+        const v = stack.popF64();
+        stack.pushI64(@as(i64, @bitCast(v)));
+    }
+
+    pub fn f32ReinterpretI32(stack: *Stack) void {
+        const v = stack.popI32();
+        stack.pushF32(@as(f32, @bitCast(v)));
+    }
+
+    pub fn f64ReinterpretI64(stack: *Stack) void {
+        const v = stack.popI64();
+        stack.pushF64(@as(f64, @bitCast(v)));
+    }
+
+    pub fn f32x4DemoteF64x2Zero(stack: *Stack) void {
+        const vec = @as(f64x2, @bitCast(stack.popV128()));
+        var arr: [4]f32 = undefined;
+        arr[0] = @as(f32, @floatCast(vec[0]));
+        arr[1] = @as(f32, @floatCast(vec[1]));
+        arr[2] = 0.0;
+        arr[3] = 0.0;
+        const demoted: f32x4 = arr;
+        stack.pushV128(@as(v128, @bitCast(demoted)));
+    }
+
+    pub fn memoryInit(stack: *Stack, data_index: u32) !void {
+        const data: *const DataDefinition = &stack.topFrame().module_instance.module_def.datas.items[data_index];
+        const memory: *MemoryInstance = &stack.topFrame().module_instance.store.memories.items[0];
+
+        const length = stack.popI32();
+        const data_offset = stack.popI32();
+        const memory_offset = stack.popI32();
+
+        if (length < 0) {
+            return error.TrapOutOfBoundsMemoryAccess;
+        }
+        if (data.bytes.items.len < data_offset + length or data_offset < 0) {
+            return error.TrapOutOfBoundsMemoryAccess;
+        }
+
+        const buffer = memory.buffer();
+        if (buffer.len < memory_offset + length or memory_offset < 0) {
+            return error.TrapOutOfBoundsMemoryAccess;
+        }
+
+        const data_offset_u32 = @as(u32, @intCast(data_offset));
+        const memory_offset_u32 = @as(u32, @intCast(memory_offset));
+        const length_u32 = @as(u32, @intCast(length));
+
+        const source = data.bytes.items[data_offset_u32 .. data_offset_u32 + length_u32];
+        const destination = buffer[memory_offset_u32 .. memory_offset_u32 + length_u32];
+        @memcpy(destination, source);
+    }
+
+    pub fn memoryCopy(stack: *Stack) !void {
+        const memory: *MemoryInstance = &stack.topFrame().module_instance.store.memories.items[0];
+
+        const length_s = stack.popIndexType();
+        const source_offset_s = stack.popIndexType();
+        const dest_offset_s = stack.popIndexType();
+
+        if (length_s < 0) {
+            return error.TrapOutOfBoundsMemoryAccess;
+        }
+
+        const buffer = memory.buffer();
+        if (buffer.len < source_offset_s + length_s or source_offset_s < 0) {
+            return error.TrapOutOfBoundsMemoryAccess;
+        }
+        if (buffer.len < dest_offset_s + length_s or dest_offset_s < 0) {
+            return error.TrapOutOfBoundsMemoryAccess;
+        }
+
+        const source_offset = @as(usize, @intCast(source_offset_s));
+        const dest_offset = @as(usize, @intCast(dest_offset_s));
+        const length = @as(usize, @intCast(length_s));
+
+        const source = buffer[source_offset .. source_offset + length];
+        const destination = buffer[dest_offset .. dest_offset + length];
+
+        if (@intFromPtr(destination.ptr) < @intFromPtr(source.ptr)) {
+            std.mem.copyForwards(u8, destination, source);
+        } else {
+            std.mem.copyBackwards(u8, destination, source);
+        }
+    }
+
+    pub fn memoryFill(stack: *Stack) !void {
+        const memory: *MemoryInstance = &stack.topFrame().module_instance.store.memories.items[0];
+
+        const length_s: i64 = stack.popIndexType();
+        const value: u8 = @as(u8, @truncate(@as(u32, @bitCast(stack.popI32()))));
+        const offset_s: i64 = stack.popIndexType();
+
+        if (length_s < 0) {
+            return error.TrapOutOfBoundsMemoryAccess;
+        }
+
+        const buffer = memory.buffer();
+        if (buffer.len < offset_s + length_s or offset_s < 0) {
+            return error.TrapOutOfBoundsMemoryAccess;
+        }
+
+        const offset = @as(usize, @intCast(offset_s));
+        const length = @as(usize, @intCast(length_s));
+
+        const destination = buffer[offset .. offset + length];
+        @memset(destination, value);
+    }
+
+    pub fn tableInit(stack: *Stack, elem_index: u32, table_index: u32) !void {
+        const elem: *const ElementInstance = &stack.topFrame().module_instance.store.elements.items[elem_index];
+        const table: *TableInstance = stack.topFrame().module_instance.store.getTable(table_index);
+
+        const length_i32 = stack.popI32();
+        const elem_start_index = stack.popI32();
+        const table_start_index = stack.popI32();
+
+        if (elem_start_index + length_i32 > elem.refs.items.len or elem_start_index < 0) {
+            return error.TrapOutOfBoundsTableAccess;
+        }
+        if (table_start_index + length_i32 > table.refs.items.len or table_start_index < 0) {
+            return error.TrapOutOfBoundsTableAccess;
+        }
+        if (length_i32 < 0) {
+            return error.TrapOutOfBoundsTableAccess;
+        }
+
+        const elem_begin = @as(usize, @intCast(elem_start_index));
+        const table_begin = @as(usize, @intCast(table_start_index));
+        const length = @as(usize, @intCast(length_i32));
+
+        const dest: []Val = table.refs.items[table_begin .. table_begin + length];
+        const src: []const Val = elem.refs.items[elem_begin .. elem_begin + length];
+
+        @memcpy(dest, src);
+    }
+
+    pub fn tableCopy(stack: *Stack, dest_table_index: u32, src_table_index: u32) !void {
+        const dest_table: *TableInstance = stack.topFrame().module_instance.store.getTable(dest_table_index);
+        const src_table: *const TableInstance = stack.topFrame().module_instance.store.getTable(src_table_index);
+
+        const length_i32 = stack.popI32();
+        const src_start_index = stack.popI32();
+        const dest_start_index = stack.popI32();
+
+        if (src_start_index + length_i32 > src_table.refs.items.len or src_start_index < 0) {
+            return error.TrapOutOfBoundsTableAccess;
+        }
+        if (dest_start_index + length_i32 > dest_table.refs.items.len or dest_start_index < 0) {
+            return error.TrapOutOfBoundsTableAccess;
+        }
+        if (length_i32 < 0) {
+            return error.TrapOutOfBoundsTableAccess;
+        }
+
+        const dest_begin = @as(usize, @intCast(dest_start_index));
+        const src_begin = @as(usize, @intCast(src_start_index));
+        const length = @as(usize, @intCast(length_i32));
+
+        const dest: []Val = dest_table.refs.items[dest_begin .. dest_begin + length];
+        const src: []const Val = src_table.refs.items[src_begin .. src_begin + length];
+        if (dest_start_index <= src_start_index) {
+            std.mem.copyForwards(Val, dest, src);
+        } else {
+            std.mem.copyBackwards(Val, dest, src);
+        }
+    }
+
+    pub fn tableGrow(stack: *Stack, table_index: u32) void {
+        const table: *TableInstance = stack.topFrame().module_instance.store.getTable(table_index);
+        const length = @as(u32, @bitCast(stack.popI32()));
+        const init_value = stack.popValue();
+        const old_length = @as(i32, @intCast(table.refs.items.len));
+        const return_value: i32 = if (table.grow(length, init_value)) old_length else -1;
+        stack.pushI32(return_value);
+    }
+
+    pub fn tableSize(stack: *Stack, table_index: u32) void {
+        const table: *TableInstance = stack.topFrame().module_instance.store.getTable(table_index);
+        const length = @as(i32, @intCast(table.refs.items.len));
+        stack.pushI32(length);
+    }
+
+    pub fn tableFill(stack: *Stack, table_index: u32) !void {
+        const table: *TableInstance = stack.topFrame().module_instance.store.getTable(table_index);
+
+        const length_i32 = stack.popI32();
+        const funcref = stack.popValue();
+        const dest_table_index = stack.popI32();
+
+        if (dest_table_index + length_i32 > table.refs.items.len or length_i32 < 0) {
+            return error.TrapOutOfBoundsTableAccess;
+        }
+
+        const dest_begin = @as(usize, @intCast(dest_table_index));
+        const length = @as(usize, @intCast(length_i32));
+
+        const dest: []Val = table.refs.items[dest_begin .. dest_begin + length];
+        @memset(dest, funcref);
+    }
+
+    pub fn elemDrop(stack: *Stack, elem_index: u32) void {
+        var elem: *ElementInstance = &stack.topFrame().module_instance.store.elements.items[elem_index];
+        elem.refs.clearAndFree();
+    }
+
+    pub fn refNull(stack: *Stack, valtype: ValType) !void {
+        const val = try Val.nullRef(valtype);
+        stack.pushValue(val);
+    }
+
+    pub fn refIsNull(stack: *Stack) void {
+        const val: Val = stack.popValue();
+        const boolean: i32 = if (val.isNull()) 1 else 0;
+        stack.pushI32(boolean);
+    }
+
+    pub fn refFunc(stack: *Stack, func_index: u32) void {
+        const val = Val{ .FuncRef = .{ .index = func_index, .module_instance = stack.topFrame().module_instance } };
+        stack.pushValue(val);
+    }
+
+    pub fn f32Neg(stack: *Stack) void {
+        const f = stack.popF32();
+        stack.pushF32(-f);
+    }
+
+    pub fn f32Sqrt(stack: *Stack) void {
+        const f = stack.popF32();
+        const value = std.math.sqrt(f);
+        stack.pushF32(value);
+    }
+
+    pub fn vectorNeg(comptime T: type, stack: *Stack) void {
+        const vec = @as(T, @bitCast(stack.popV128()));
+        const negated = -vec;
+        stack.pushV128(@as(v128, @bitCast(negated)));
+    }
+
+    pub fn vectorAbsFloat(comptime T: type, stack: *Stack) void {
+        const vec = @as(T, @bitCast(stack.popV128()));
+        const abs = @abs(vec);
+        stack.pushV128(@as(v128, @bitCast(abs)));
+    }
+
+    pub fn vectorSqrt(comptime T: type, stack: *Stack) void {
+        const vec = @as(T, @bitCast(stack.popV128()));
+        const root = @sqrt(vec);
+        stack.pushV128(@as(v128, @bitCast(root)));
+    }
+
+    pub fn vectorDotI16(stack: *Stack) void {
+        const i32x8 = @Vector(8, i32);
+        const v1: i32x8 = @as(i16x8, @bitCast(stack.popV128()));
+        const v2: i32x8 = @as(i16x8, @bitCast(stack.popV128()));
+        const product = v1 * v2;
+        var arr: [4]i32 = undefined;
+        for (&arr, 0..) |*v, i| {
+            const p1: i32 = product[i * 2];
+            const p2: i32 = product[(i * 2) + 1];
+            v.* = p1 +% p2;
+        }
+        const dot: i32x4 = arr;
+        stack.pushV128(@as(v128, @bitCast(dot)));
     }
 };
